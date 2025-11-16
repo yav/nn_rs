@@ -58,7 +58,7 @@ fn neuron(ws: &[R], xs: &[R]) -> R {
 // `y` is the output of the neuron at the point of interest,
 // `gs_dy` are the partial derivatives of the rest of the error function
 //    (following layers and loss function) wrt to their inputs
-//    this only counts derivates wrt actul inputs (i.e., no bias)
+//    this only counts derivatives wrt actual inputs (i.e., no bias)
 // `delta` is where we place the derivatives.
 fn neuron_delta(other: &[R], y: R, gs_dy: &[R], delta: &mut [R]) {
   let dsig = sigmoid_dy(y);
@@ -164,7 +164,7 @@ pub struct Net {
 
 impl Net {
   /// Create a new net where all weights are a constant.
-  pub fn new(dim: &NetDim, ini: R) -> Self {
+  pub fn new(dim: NetDim, ini: R) -> Self {
     let mut layers  = Vec::with_capacity(2 + dim.hidden);
     let neuron      = |i| vec![ini; i + 1]; // bias + weights for inputs
     let mut layer   = |i,o| layers.push(vec![neuron(i); o]);
@@ -197,17 +197,17 @@ impl Net {
 
   /// Number of inputs.
   fn input_size(&self) -> usize {
-    self.layers[0].len() - 1
+    self.layers[0][0].len() - 1
   }
 
   /// Number of outputs.
   fn output_size(&self) -> usize {
-    self.layers.last().unwrap().len() - 1
+    self.layers.last().unwrap().len()
   }
 
   /// Size of hidden layers.
   fn hidden_size(&self) -> usize {
-    self.layers[1].len() - 1
+    self.layers[0].len()
   }
 
   /// Total number of layers in the network, including
@@ -232,7 +232,7 @@ impl Net {
   pub fn load(path: &str) -> std::io::Result<Net> {
     let mut f = std::fs::File::open(path)?;
     let dim = NetDim::load(&mut f)?;
-    let mut net = Net::new(&dim, 0.0);
+    let mut net = Net::new(dim, 0.0);
     for l in net.iter_mut() {
       for n in l.iter_mut() {
         for w in n.iter_mut() {
@@ -257,10 +257,29 @@ impl Net {
       }
     }
   }
+
+  pub fn print(&self) {
+    let last = self.layer_num() - 1;
+    for (i,l) in self.iter().enumerate() {
+      if i == 0 { println!("=== Input Layer ({} -> {}) ===", self.input_size(), self.hidden_size()) } else {
+      if i == last { println!("=== Output Layer ({} -> {}) ===", self.hidden_size(), self.output_size()) } else {  
+      println!("=== Hidden Layer {} ({} -> {}) ===", i, self.hidden_size(), self.hidden_size())
+      }};
+      
+      for (i,n) in l.iter().enumerate() {
+        print!("({:4})", i);
+        for w in n.iter() {
+          print!(" {:4.2}", *w);
+        }
+        println!("")
+      }
+      println!("")
+    }
+  }
 }
 
 
-/// A neural net that can be used to map inputs to outpus.
+/// A neural net that can be used to map inputs to outputs.
 pub struct NetRunner<'a> {
   net:    &'a Net,
   buf1:   Vec<R>,
@@ -346,7 +365,7 @@ impl NetLearner {
     bufs.push(vec![0.0; dim.outputs + 1]);
     NetLearner {
       net:        net,
-      d_layers:   Net::new(&dim, 0.0),
+      d_layers:   Net::new(dim, 0.0),
       batches:    0.0,
 
       learning_rate: 0.1,
