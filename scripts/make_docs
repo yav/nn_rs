@@ -1,0 +1,6 @@
+#!/bin/bash
+
+cargo doc --no-deps
+cp -r target/doc/* docs/
+
+
