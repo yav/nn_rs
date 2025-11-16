@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["sel","sigmoid"],"struct":["Net","NetDim","NetLearner","NetRunner"],"type":["R"]};
