@@ -276,7 +276,7 @@ impl<'a> NetRunner<'a> {
   pub fn set_input(&mut self) -> &mut[R] {
     let b = self.buf1.as_mut_slice();
     b[0] = 1.0;
-    &mut b[1 .. self.net.input_size() + 1]
+    &mut b[1 ..= self.net.input_size()]
   }
 
   /// Evaluate the net on the current input.
@@ -295,7 +295,7 @@ impl<'a> NetRunner<'a> {
             } else {
               self.buf1.as_slice()
             };
-    &r[1 .. self.net.output_size() + 1]
+    &r[1 ..= self.net.output_size()]
   }
 
 }
@@ -327,7 +327,7 @@ impl NetLearner {
     let dim = net.dim();
     let size = std::cmp::max(dim.hidden, dim.outputs);
     let mut bufs = Vec::with_capacity(dim.hidden + 2);  // layer outputs
-    for _ in 0 .. dim.hidden + 1 { bufs.push(vec![0.0; dim.hidden_size + 1]) }
+    for _ in 0 ..= dim.hidden { bufs.push(vec![0.0; dim.hidden_size + 1]) }
     bufs.push(vec![0.0; dim.outputs + 1]);
     NetLearner {
       net:        net,
