@@ -265,7 +265,12 @@ impl<'a> NetRunner<'a> {
   }
 
   /// Set the weights for the runner.
-  pub fn set_net(&mut self, net: &'a Net) { self.net = net }
+  pub fn set_net(&mut self, net: &'a Net) {
+    self.net = net;
+    let size = 1 + std::cmp::max(net.hidden_size(), net.output_size());
+    self.buf1.resize(size, 0.0);
+    self.buf2.resize(size, 0.0);
+  }
 
   /// Get a reference to fill in the input to the net.
   pub fn set_input(&mut self) -> &mut[R] {
