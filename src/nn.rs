@@ -1,4 +1,6 @@
 use std::io::{Read, Write};
+use rand::Rng;
+use rand::distr::Uniform;
 
 /// The type of net weights, inputs, and outputs.
 pub type R = f32;
@@ -241,6 +243,19 @@ impl Net {
       }
     }
     Ok(net)
+  }
+
+  /// Set the weights to random numbers in the given range (inclusive)
+  pub fn randomize(&mut self, lower: R, upper: R) {
+    let mut rng = rand::rng();
+    let d = Uniform::new(lower, upper).unwrap();
+    for l in self.iter_mut() {
+      for n in l.iter_mut() {
+        for w in n.iter_mut() {
+          *w = rng.sample(d);
+        }
+      }
+    }
   }
 }
 
