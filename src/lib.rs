@@ -294,8 +294,8 @@ impl RunnerEmpty {
     RunnerEmpty { buf1: vec![], buf2: vec![] }
   }
 
-  pub fn set_net(mut self, net: &Weights) -> RunnerReady {
-    let size = 1 + std::cmp::max(net.hidden_size(), net.output_size());
+  pub fn set_weights(mut self, net: &Weights) -> RunnerReady {
+    let size = 1 + std::cmp::max(net.input_size(), std::cmp::max(net.hidden_size(), net.output_size()));
     self.buf1.resize(size, 0.0);
     self.buf2.resize(size, 0.0);
     RunnerReady { net:net, buf1: self.buf1, buf2: self.buf2 }
@@ -362,7 +362,8 @@ impl Learner {
   pub fn new(net: Weights) -> Self {
     let dim = net.dim();
     let size = std::cmp::max(dim.hidden, dim.outputs);
-    let mut bufs = Vec::with_capacity(dim.hidden + 2);  // layer outputs
+    let mut bufs = Vec::with_capacity(1 + net.layer_num()); // 1 extra fro input
+    bufs.push(vec![0.0; dim.inputs + 1]);
     for _ in 0 ..= dim.hidden { bufs.push(vec![0.0; dim.hidden_size + 1]) }
     bufs.push(vec![0.0; dim.outputs + 1]);
     Learner {
@@ -433,7 +434,7 @@ impl Learner {
     let outs      = self.buffers.iter().skip(1).map(|x| x.as_slice());
     let ls        = self.net.iter().rev();
     let dls       = self.d_layers.iter_mut().rev();
-    let mut steps = ins.zip(outs).zip(ls).zip(dls);
+    let mut steps = ins.zip(outs).rev().zip(ls).zip(dls);
 
     let (((last_is, last_os), last_ns), last_dns) = steps.next().unwrap();
     let last_os1 = &last_os[1..];
