@@ -118,8 +118,8 @@ fn layer_dx_last(ns: &[Neuron], ys: &[R], gs_dy: &[R], d_xs: &mut [R]) {
 
 
 /// Geometry of a neural net.
-#[derive(Copy,Clone)]
-pub struct NetDim {
+#[derive(Copy,Clone,Debug)]
+pub struct Dim {
   /// Number of inputs to the net
   pub inputs: usize,
 
@@ -133,7 +133,7 @@ pub struct NetDim {
   pub hidden_size: usize
 }
 
-impl NetDim {
+impl Dim {
   fn save(self, f: &mut impl Write) -> std::io::Result<()>{
     let mut save = |x| f.write_all(&(x as u64).to_le_bytes());
     save(self.inputs)?;
@@ -142,13 +142,13 @@ impl NetDim {
     save(self.hidden_size)
   }
 
-  fn load(f: &mut impl Read) -> std::io::Result<NetDim> {
+  fn load(f: &mut impl Read) -> std::io::Result<Dim> {
     let mut load = || {
       let mut b = [0; size_of::<u64>()];
       if let Err(e) = f.read_exact(&mut b) { Err(e) }
       else { Ok(u64::from_le_bytes(b) as usize) }
     };
-    Ok(NetDim {
+    Ok(Dim {
       inputs:       load()?,
       outputs:      load()?,
       hidden:       load()?,
@@ -158,13 +158,13 @@ impl NetDim {
 }
 
 /// The weights of a neural network.
-pub struct Net {
+pub struct Weights {
   layers: Vec<Layer>
 }
 
-impl Net {
+impl Weights {
   /// Create a new net where all weights are a constant.
-  pub fn new(dim: NetDim, ini: R) -> Self {
+  pub fn new(dim: Dim, ini: R) -> Self {
     let mut layers  = Vec::with_capacity(2 + dim.hidden);
     let neuron      = |i| vec![ini; i + 1]; // bias + weights for inputs
     let mut layer   = |i,o| layers.push(vec![neuron(i); o]);
@@ -174,7 +174,7 @@ impl Net {
       layer(dim.hidden_size,dim.hidden_size)
     }
     layer(dim.hidden_size, dim.outputs);
-    Net { layers }
+    Weights { layers }
   }
 
   fn iter(&self) -> impl DoubleEndedIterator<Item=&Layer> {
@@ -186,8 +186,8 @@ impl Net {
   }
 
   /// Get the dimension of this net
-  pub fn dim(&self) -> NetDim {
-    NetDim {
+  pub fn dim(&self) -> Dim {
+    Dim {
       inputs: self.input_size(),
       outputs: self.output_size(),
       hidden_size: self.hidden_size(),
@@ -216,6 +216,7 @@ impl Net {
     self.layers.len()
   }
 
+  /// Save the weights to a file.
   pub fn save(&self, path: &str) -> std::io::Result<()> {
     let mut f = std::fs::File::create(path)?;
     self.dim().save(&mut f)?;
@@ -229,10 +230,11 @@ impl Net {
     Ok(())
   }
 
-  pub fn load(path: &str) -> std::io::Result<Net> {
+  /// Load some weights from a file.
+  pub fn load(path: &str) -> std::io::Result<Weights> {
     let mut f = std::fs::File::open(path)?;
-    let dim = NetDim::load(&mut f)?;
-    let mut net = Net::new(dim, 0.0);
+    let dim = Dim::load(&mut f)?;
+    let mut net = Weights::new(dim, 0.0);
     for l in net.iter_mut() {
       for n in l.iter_mut() {
         for w in n.iter_mut() {
@@ -258,6 +260,7 @@ impl Net {
     }
   }
 
+  /// Print the network to stdout (for debugging).
   pub fn print(&self) {
     let last = self.layer_num() - 1;
     for (i,l) in self.iter().enumerate() {
@@ -279,31 +282,30 @@ impl Net {
 }
 
 
+/// Infrastructure for evaluating a net, without the weights.
+pub struct RunnerEmpty { buf1: Vec<R>, buf2: Vec<R> }
+
 /// A neural net that can be used to map inputs to outputs.
-pub struct NetRunner<'a> {
-  net:    &'a Net,
-  buf1:   Vec<R>,
-  buf2:   Vec<R>
-}
+pub struct RunnerReady<'a> { net: &'a Weights, buf1: Vec<R>, buf2: Vec<R> }
 
-impl<'a> NetRunner<'a> {
 
-  /// Create a new runner using the given weights.
-  pub fn new(net: &'a Net) -> Self {
-    let size = 1 + std::cmp::max(net.hidden_size(), net.output_size());
-    NetRunner {
-      net:  net,
-      buf1: vec![0.0; size],
-      buf2: vec![0.0; size]
-    }
+impl RunnerEmpty {
+  pub fn new() -> Self {
+    RunnerEmpty { buf1: vec![], buf2: vec![] }
   }
 
-  /// Set the weights for the runner.
-  pub fn set_net(&mut self, net: &'a Net) {
-    self.net = net;
+  pub fn set_net(mut self, net: &Weights) -> RunnerReady {
     let size = 1 + std::cmp::max(net.hidden_size(), net.output_size());
     self.buf1.resize(size, 0.0);
     self.buf2.resize(size, 0.0);
+    RunnerReady { net:net, buf1: self.buf1, buf2: self.buf2 }
+  } 
+}
+
+impl<'a> RunnerReady<'a> {
+
+  pub fn clear_net(self) -> RunnerEmpty {
+    RunnerEmpty { buf1: self.buf1, buf2: self.buf2 }
   }
 
   /// Get a reference to fill in the input to the net.
@@ -335,9 +337,9 @@ impl<'a> NetRunner<'a> {
 }
 
 /// A neural net in training.
-pub struct NetLearner {
-  net:      Net,            // weights
-  d_layers: Net,            // weight gradients
+pub struct Learner {
+  net:      Weights,            // weights
+  d_layers: Weights,            // weight gradients
   batches: R,               // how many samples are in the (gradient for batching)
 
   /// Determines how much to change the net's state based on a batch
@@ -354,18 +356,18 @@ pub struct NetLearner {
 }
 
 
-impl NetLearner {
+impl Learner {
 
   /// Create a trainer for the given net.
-  pub fn new(net: Net) -> Self {
+  pub fn new(net: Weights) -> Self {
     let dim = net.dim();
     let size = std::cmp::max(dim.hidden, dim.outputs);
     let mut bufs = Vec::with_capacity(dim.hidden + 2);  // layer outputs
     for _ in 0 ..= dim.hidden { bufs.push(vec![0.0; dim.hidden_size + 1]) }
     bufs.push(vec![0.0; dim.outputs + 1]);
-    NetLearner {
+    Learner {
       net:        net,
-      d_layers:   Net::new(dim, 0.0),
+      d_layers:   Weights::new(dim, 0.0),
       batches:    0.0,
 
       learning_rate: 0.1,
@@ -452,9 +454,9 @@ impl NetLearner {
   }
 
   /// The current state of the net
-  pub fn get_net(&self) -> &Net { &self.net }
+  pub fn get_weights(&self) -> &Weights { &self.net }
 
   /// Extract net and destroy training infrastructure.
-  pub fn complete(self) -> Net { self.net }
+  pub fn complete(self) -> Weights { self.net }
 }
 
