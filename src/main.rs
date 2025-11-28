@@ -1,55 +1,50 @@
 use nn;
 
-fn set_input(buf: &mut [nn::R], x: usize) {
-  for bit in 0 .. 8 {
-    buf[bit] = if bit == x { 1.0 } else { 0.0 };
-  }
-}
 
-fn show_net(run: nn::RunnerEmpty, net: &nn::Weights) -> nn::RunnerEmpty {
-  let mut r = run.set_weights(net);
-  for x in 0 .. 8 {
-    //set_input(r.set_input(), x);
-    print!(" ");
-    r.eval();
-    let y = r.get_output()[0];
-    let expect = (x as nn::R) / 8.0;
-    println!("Input: {} -> {}, err = {}", x, y, nn::sel(r.get_output(),&[expect]));
-  }
-  r.clear_net()
+
+fn check(buf: nn::RunnerEmpty, net: &nn::Learner) -> (nn::R, nn::RunnerEmpty) {
+  let mut r = buf.set_weights(net.get_weights());
+  r.set_input()[0] = 0.0;
+  r.eval();
+  (nn::loss(r.get_output(),&[0.0]), r.clear_net())
 }
 
 pub fn main() {
   let mut n = nn::Weights::new(nn::Dim { 
-     inputs: 8,
+     inputs: 1,
      outputs: 1,
-     hidden: 1,
-     hidden_size: 5
-  }, 0.5);
+     hidden: 0,
+     hidden_size: 1
+  }, 0.0);
   println!("\n{:?}\n", n.dim());
-  //n.randomize(0.0,1.0);
-  n.print();
+  n.randomize(0.0,1.0);
+  // n.print();
 
   let mut r = nn::RunnerEmpty::new();
-  r = show_net(r, &n);
-  println!("");
 
   let mut l = nn::Learner::new(n);
-  l.learning_rate = 0.001;
+  l.learning_rate = 1.0;
 
-  for e in 0 .. 1_000_000 {
-    if e % 10000 == 0 { println!("{}", e); r = show_net(r, l.get_weights()); println!("---"); }
-    for x in 0 .. 8 {
-      set_input(l.set_input(),x);
-      l.set_output()[0] = (x as nn::R) / 8.0;
-      l.train();
-      l.finish_batch();
-    }
+  
+  for e in 0 .. 1000000 {
+    //println!("Step {}", e);
+    //l.get_weights().print();
+    let (err1,r1) = check(r, &l);
+    r = r1;
+    l.set_input()[0] = 0.0;
+    l.set_output()[0] = 0.0;
+    l.train();
+    l.finish_batch();
+    let (err2, r1) = check(r, &l);
+    r = r1;
+    println!("[{}] {} -> {}", (if err2 > err1 { "!!" } else { "OK" }), err1, err2);
     
   }
 
   n = l.complete();
-  show_net(r, &n);
   n.print();
-  
+  let mut r = r.set_weights(&n);
+  r.set_input()[0] = 0.0;
+  r.eval();
+  println!("RES: {}", r.get_output()[0]);
 }

@@ -22,17 +22,19 @@ fn sigmoid_dy(y: R) -> R {
   y * (1.0 - y)
 }
 
-/// Square error loss function.  Used during training to estimate how
-/// far off we are from a desired result.
-pub fn sel(ys_actual: &[R], ys_expected: &[R]) -> R {
+/// Loss function.  We use half of the sum of squares of the pointwise errors.
+pub fn loss(ys_actual: &[R], ys_expected: &[R]) -> R {
   ys_expected.iter().zip(ys_actual.iter())
     .map(|(a,b)| (a - b) * (a - b)).sum::<R>() * 0.5
 }
 
-// How SEL changes when each of its inputs are changed
-fn sel_dx(ys_actual: &[R], ys_expected_in_out: &mut [R]) {
-  for (e,x) in ys_actual.iter().zip(ys_expected_in_out.iter_mut()) {
-    *x -= e;
+// How the loos function changes when each of its inputs are changed.
+// The first argument contains bias.
+// The second argument takes the expected results,
+// and returns the gradient.
+fn loss_dx(ys_actual: &[R], ys_expected: &mut [R]) {
+  for i in 1 .. ys_actual.len() {
+    ys_expected[i - 1] = ys_actual[i] - ys_expected[i - 1];
   }
 }
 
@@ -46,34 +48,19 @@ fn neuron(ws: &[R], xs: &[R]) -> R {
   sigmoid(linear(ws,xs))
 }
 
-// How error will change if we change a neuron, which is not in the last layer.
-// The last layer is a bit different because the output of the neuron is
-// connected to only one input of the loss function---in contrast, a neuron
-// from an earlier layer sends its output to all inputs of the net layer.
-// We use this for both computing the change wrt weights and inputs,
-// but we provide different arguments in each case.
+// How error will change if we change the linear part of a neuron neuron.
 //
 // This assumes that inputs and outputs contain bias elements.
+//
 // `other` is the parameter that is fixed (e.g., inputs if changing weights),
 // `y` is the output of the neuron at the point of interest,
-// `gs_dy` are the partial derivatives of the rest of the error function
-//    (following layers and loss function) wrt to their inputs
-//    this only counts derivatives wrt actual inputs (i.e., no bias)
+// `d_err` indicate how the error will change wrt to this neuron (i.e., what it is connected to)
 // `delta` is where we place the derivatives.
-fn neuron_delta(other: &[R], y: R, gs_dy: &[R], delta: &mut [R]) {
-  let dsig = sigmoid_dy(y);
-  for (i,out) in other.iter().zip(delta.iter_mut()) {
-    let dlocal = *i * dsig;  // the derivative of linear is just other
-    *out += gs_dy.iter().map(|d| dlocal * *d).sum::<R>(); 
-  }
-}
-
-// Each neuron in the last layer is connect only to one input of the loss function
-fn neuron_delta_last(other: &[R], y: R, g_dy: R, delta: &mut [R]) {
-  let grad = sigmoid_dy(y) * g_dy;
-  for (i,out) in other.iter().zip(delta.iter_mut()) {
-    *out += *i * grad
-  }
+fn neuron_lin_delta(other: &[R], d_err: &[R], delta: &mut [R]) {
+  for i in 0 .. other.len() {
+    let x = other[i];
+    delta[i] += d_err.iter().map(|d| x * *d).sum::<R>();  
+  };
 }
 
 // Assumes `xs` contains a bias input
@@ -86,34 +73,46 @@ fn layer(ns: &[Neuron], xs: &[R], res: &mut [R]) {
 }
 
 
-// Assumes `xs` contains a bias input
-fn layer_dw(xs: &[R], ys: &[R], gs_dy: &[R], d_ns: &mut [Vec<R>]) {
-  for (y,dws) in ys.iter().zip(d_ns.iter_mut()) {
-    neuron_delta(xs, *y, gs_dy, dws);
+// Update the error gradient to account for changes due to the actuators.
+// `ys` is the results of the layer (i.e., the normalized value).
+// The first element is bias
+fn actuator_layer_delta(ys: &[R], gs_dy: &mut [R]) {
+  for i in 1 .. ys.len() {
+    gs_dy[i - 1] *= sigmoid_dy(ys[i]);
   }
+}
+
+// Assumes `xs` and `ys` contains a bias element.
+fn lin_layer_dw(xs: &[R], d_err: &[R], d_ns: &mut [Vec<R>]) {
+  for i in 0 .. d_ns.len() {
+    neuron_lin_delta(xs, d_err, d_ns[i].as_mut_slice());
+  };
 }
 
 // Assumes `xs` contains a bias input
-fn last_layer_dw(xs: &[R], ys: &[R], gs_dy: &[R], d_ns: &mut [Vec<R>]) {
-  for ((y,dws),g) in ys.iter().zip(d_ns.iter_mut()).zip(gs_dy) {
-    neuron_delta_last(xs, *y, *g, dws);
-  }
+// In the last layer a neuron is connected only to a single input of the error function.
+fn last_lin_layer_dw(xs: &[R], gs_dy: &[R], d_ns: &mut [Vec<R>]) {
+  for i in 0 .. d_ns.len() {
+    neuron_lin_delta(xs, &[gs_dy[i]], d_ns[i].as_mut_slice());
+  };
+}
+
+// Compute derivative wrt to inputs
+fn lin_layer_dx(ns: &[Neuron], d_err: &[R], d_xs: &mut [R]) {
+  d_xs.fill(0.0);
+  for i in 0 .. ns.len() {
+    neuron_lin_delta(&ns[i].as_slice()[1..], d_err, d_xs);
+  };
+  
 }
 
 // Compute derivative wrt to inputs (not counting bias)
-fn layer_dx(ns: &[Neuron], ys: &[R], gs_dy: &[R], d_xs: &mut [R]) {
+fn last_lin_layer_dx(ns: &[Neuron], d_err: &[R], d_xs: &mut [R]) {
+  
   d_xs.fill(0.0);
-  for (y,ws) in ys.iter().zip(ns.iter()) {
-    neuron_delta(&ws.as_slice()[1..], *y, gs_dy, d_xs);
-  }
-}
-
-// Compute derivative wrt to inputs (not counting bias)
-fn layer_dx_last(ns: &[Neuron], ys: &[R], gs_dy: &[R], d_xs: &mut [R]) {
-  d_xs.fill(0.0);
-  for ((y,ws),g) in ys.iter().zip(ns.iter()).zip(gs_dy) {
-    neuron_delta_last(&ws.as_slice()[1..], *y, *g, d_xs);
-  }
+  for i in 0 .. ns.len() {
+    neuron_lin_delta(&ns[i].as_slice()[1..], &[d_err[i]], d_xs);
+  };
 }
 
 
@@ -272,7 +271,7 @@ impl Weights {
       for (i,n) in l.iter().enumerate() {
         print!("({:4})", i);
         for w in n.iter() {
-          print!(" {:4.2}", *w);
+          print!(" {:8.4}", *w);
         }
         println!("")
       }
@@ -327,9 +326,9 @@ impl<'a> RunnerReady<'a> {
   /// Get the output of the net.
   pub fn get_output(&self) -> &[R] {
     let r = if self.net.layer_num() & 1 == 0 {
-              self.buf2.as_slice()
-            } else {
               self.buf1.as_slice()
+            } else {
+              self.buf2.as_slice()
             };
     &r[1 ..= self.net.output_size()]
   }
@@ -390,7 +389,7 @@ impl Learner {
   /// Get a buffer to fill a desired output.
   pub fn set_output(&mut self) -> &mut [R] {
     // Note that gradient buffers do not contain space for the bias inputs
-    // as they don;t chnage
+    // as those don't change.
     let b = self.gbuf1.as_mut_slice();
     &mut b[0 .. self.net.output_size()]
   }
@@ -406,10 +405,11 @@ impl Learner {
 
   /// Update the net's state based on the examples in the current batch.
   pub fn finish_batch(&mut self) {
+    let scale = self.learning_rate / self.batches;
     for (l,dl) in self.net.iter_mut().zip(self.d_layers.iter_mut()) {
       for (n,dn) in l.iter_mut().zip(dl.iter_mut()) {
         for (w,dw) in n.iter_mut().zip(dn.iter_mut()) {
-          *w += *dw/self.batches * self.learning_rate;
+          *w -= *dw * scale;
           *dw = 0.0;
         }
       }
@@ -430,29 +430,32 @@ impl Learner {
 
   
   fn backprop(&mut self) {
-    let ins       = self.buffers.iter().map(|x| x.as_slice());
-    let outs      = self.buffers.iter().skip(1).map(|x| x.as_slice());
+    let ins       = self.buffers.iter().map(|x| x.as_slice()).rev();
+    let outs      = self.buffers.iter().skip(1).map(|x| x.as_slice()).rev();
     let ls        = self.net.iter().rev();
     let dls       = self.d_layers.iter_mut().rev();
-    let mut steps = ins.zip(outs).rev().zip(ls).zip(dls);
+    let mut steps = ins.zip(outs).zip(ls).zip(dls);
 
     let (((last_is, last_os), last_ns), last_dns) = steps.next().unwrap();
-    let last_os1 = &last_os[1..];
 
-    sel_dx(last_os1, self.gbuf1.as_mut_slice());
-    last_layer_dw(last_is, last_os1, self.gbuf1.as_slice(), last_dns.as_mut_slice());
-    layer_dx_last(last_ns.as_slice(), last_os1, self.gbuf1.as_slice(), self.gbuf2.as_mut_slice());
+    loss_dx(last_os, self.gbuf1.as_mut_slice());
+    actuator_layer_delta(last_os, self.gbuf1.as_mut_slice());
+    last_lin_layer_dw(last_is, self.gbuf1.as_slice(), last_dns.as_mut_slice());
+    last_lin_layer_dx(last_ns.as_slice(), self.gbuf1.as_slice(), self.gbuf2.as_mut_slice());
 
     let mut swap = false;
     for (((xs,ys), ns), dns) in steps {
-      let ys1 = &ys[1..];
-      let (rd,wt) = if swap { (self.gbuf1.as_slice(), self.gbuf2.as_mut_slice()) }
-                       else { (self.gbuf2.as_slice(), self.gbuf1.as_mut_slice()) };
-      layer_dw(xs, ys1, rd, dns.as_mut_slice());
-      layer_dx(ns.as_slice(), ys, rd, wt);
+      let (cur,next) = if swap { (self.gbuf1.as_mut_slice(), self.gbuf2.as_mut_slice()) }
+                          else { (self.gbuf2.as_mut_slice(), self.gbuf1.as_mut_slice()) };
+      actuator_layer_delta(ys, cur);
+      lin_layer_dw(xs,            cur, dns.as_mut_slice());
+      lin_layer_dx(ns.as_slice(), cur, next);
       swap = !swap;
     }
   }
+
+
+// r = phi(w1 + x*w2) * w3 + w4
 
   /// The current state of the net
   pub fn get_weights(&self) -> &Weights { &self.net }
