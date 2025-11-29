@@ -9,9 +9,66 @@ type Neuron = Vec<R>;       // defined by weights
 type Layer  = Vec<Neuron>;  // a bunch of neurons sharing input
 
 
+/// How to compute the output of the net, and check for error.
+pub trait FinalLayer {
+  /// Normalize the given results.
+  /// First element of `ys` is bias.
+  fn normalize(ys: &mut [R]);
+
+  /// Compute the error for the given results.
+  /// `actual` and `expected` DO  NOT contain bias.
+  fn error(actual: &[R], expected: &[R]) -> R;
+
+  /// Compute the error gradient.   The error gradient is returned in
+  /// the location where the expected values were provided.
+  /// First element of `actual` iss bias, `expected` does not have bias.
+  fn error_delta(actual: &[R], expected: &mut[R]);
+}
+
+/// Don't normalize the outputs, and use square error loss.
+pub struct Direct {}
+
+impl FinalLayer for Direct {
+  fn normalize(_xs: &mut [R]) {}
+
+  fn error(actual: &[R], expected: &[R]) -> R {
+    expected.iter().zip(actual.iter())
+    .map(|(a,b)| (a - b) * (a - b)).sum::<R>() * 0.5
+  }
+  fn error_delta(actual: &[R], expected: &mut [R]) {
+    for i in 1 .. actual.len() {
+      expected[i - 1] = actual[i] - expected[i - 1];
+    }
+  }
+}
+
+
+/// Normalize outputs with softmax, and use cross-entropy loss.
+/// This is suitable for functions that need to pick one out of some
+/// options (i.e., classifiers).   Each result represents the likelihood that
+/// the input belongs to the given class, and all outputs some up to 1.
+pub struct Softmax {}
+
+impl FinalLayer for Softmax {
+  fn normalize(xs: &mut [R]) {
+    let tot = xs.iter().skip(1).map(|x| x.exp()).sum::<R>();
+    for i in 1 .. xs.len() {
+      xs[i] = xs[i].exp() / tot; 
+    }
+  }
+  fn error(actual: &[R], expected: &[R]) -> R {
+    - actual.iter().zip(expected.iter()).map(|(x,t)| t * x.ln()).sum::<R>()
+  }
+  fn error_delta(actual: &[R], expected: &mut [R]) {
+    for i in 1 .. actual.len() {
+      expected[i - 1] = actual[i] - expected[i - 1];
+    }
+  }
+}
+
 /// Activation function for a neuron.  Used to normalize each neuron's
 /// output.
-pub fn sigmoid(x: R) -> R {
+fn sigmoid(x: R) -> R {
   1.0 / (1.0 + (-x).exp())
 }
 
@@ -62,6 +119,7 @@ fn neuron_lin_delta(other: &[R], d_err: &[R], delta: &mut [R]) {
     delta[i] += d_err.iter().map(|d| x * *d).sum::<R>();  
   };
 }
+
 
 // Assumes `xs` contains a bias input
 // Produces an additional bias result in the first slot of the output
