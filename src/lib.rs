@@ -5,11 +5,10 @@ use std::io::{Read, Write};
 use std::marker::PhantomData;
 use rand::Rng;
 use rand::distr::Uniform;
-use crate::common::{sigmoid,sigmoid_dy};
+use crate::common::*;
 use crate::output::Norm;
 
 
-type Neuron = Vec<R>;       // defined by weights
 type Layer  = Vec<Neuron>;  // a bunch of neurons sharing input
 
 /// The type of net weights, inputs, and outputs.
@@ -21,30 +20,9 @@ mod common;
 pub mod output;
 
 // Assumes `xs` contains a bias input (1)
-fn linear(ws: &[R], xs: &[R]) -> R {
-  ws.iter().zip(xs).map(|(x,y)| x * y).sum::<R>()
-}
-
-// Assumes `xs` contains a bias input (1)
 fn neuron(ws: &[R], xs: &[R]) -> R {
   sigmoid(linear(ws,xs))
 }
-
-// How error will change if we change the linear part of a neuron neuron.
-//
-// This assumes that inputs and outputs contain bias elements.
-//
-// `other` is the parameter that is fixed (e.g., inputs if changing weights),
-// `y` is the output of the neuron at the point of interest,
-// `d_err` indicate how the error will change wrt to this neuron (i.e., what it is connected to)
-// `delta` is where we place the derivatives.
-fn neuron_lin_delta(other: &[R], d_err: &[R], delta: &mut [R]) {
-  for i in 0 .. other.len() {
-    let x = other[i];
-    delta[i] += d_err.iter().map(|d| x * *d).sum::<R>();  
-  };
-}
-
 
 // Assumes `xs` contains a bias input
 // Produces an additional bias result in the first slot of the output
@@ -72,39 +50,6 @@ fn actuator_layer_delta(ys: &[R], gs_dy: &mut [R]) {
   for i in 1 .. ys.len() {
     gs_dy[i - 1] *= sigmoid_dy(ys[i]);
   }
-}
-
-// Assumes `xs` and `ys` contains a bias element.
-fn lin_layer_dw(xs: &[R], d_err: &[R], d_ns: &mut [Vec<R>]) {
-  for i in 0 .. d_ns.len() {
-    neuron_lin_delta(xs, d_err, d_ns[i].as_mut_slice());
-  };
-}
-
-// Assumes `xs` contains a bias input
-// In the last layer a neuron is connected only to a single input of the error function.
-fn last_lin_layer_dw(xs: &[R], gs_dy: &[R], d_ns: &mut [Vec<R>]) {
-  for i in 0 .. d_ns.len() {
-    neuron_lin_delta(xs, &[gs_dy[i]], d_ns[i].as_mut_slice());
-  };
-}
-
-// Compute derivative wrt to inputs
-fn lin_layer_dx(ns: &[Neuron], d_err: &[R], d_xs: &mut [R]) {
-  d_xs.fill(0.0);
-  for i in 0 .. ns.len() {
-    neuron_lin_delta(&ns[i].as_slice()[1..], d_err, d_xs);
-  };
-  
-}
-
-// Compute derivative wrt to inputs (not counting bias)
-fn last_lin_layer_dx(ns: &[Neuron], d_err: &[R], d_xs: &mut [R]) {
-  
-  d_xs.fill(0.0);
-  for i in 0 .. ns.len() {
-    neuron_lin_delta(&ns[i].as_slice()[1..], &[d_err[i]], d_xs);
-  };
 }
 
 
