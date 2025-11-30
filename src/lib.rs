@@ -1,4 +1,5 @@
 use std::io::{Read, Write};
+use std::marker::PhantomData;
 use rand::Rng;
 use rand::distr::Uniform;
 
@@ -9,8 +10,8 @@ type Neuron = Vec<R>;       // defined by weights
 type Layer  = Vec<Neuron>;  // a bunch of neurons sharing input
 
 
-/// How to compute the output of the net, and check for error.
-pub trait FinalLayer {
+/// How to compute and validate the output of the net.
+pub trait OutputNorm {
   /// Normalize the given results.
   fn normalize(ys: &mut [R]);
 
@@ -23,10 +24,9 @@ pub trait FinalLayer {
 }
 
 /// Don't normalize the outputs, and use square error loss.
-#[derive(Copy,Clone)]
-pub struct Direct {}
+pub struct OutputVec {}
 
-impl FinalLayer for Direct {
+impl OutputNorm for OutputVec {
   fn normalize(_xs: &mut [R]) {}
 
   fn error(actual: &[R], expected: &[R]) -> R {
@@ -40,15 +40,33 @@ impl FinalLayer for Direct {
   }
 }
 
+/// Normalize the outputs with sigmoid, and use square error loss.
+pub struct OutputBitVec {}
+
+impl OutputNorm for OutputBitVec {
+  fn normalize(ys: &mut [R]) {
+    for y in ys.iter_mut() {
+      *y = sigmoid(*y);
+    }
+  }
+  fn error(actual: &[R], expected: &[R]) -> R {
+    OutputVec::error(actual, expected)
+  }
+  fn error_delta(actual: &[R], expected: &mut[R]) {
+    for i in 0 .. actual.len() {
+      expected[i] = actual[i] - expected[i];
+    } 
+  }
+}
+
 
 /// Normalize outputs with softmax, and use cross-entropy loss.
 /// This is suitable for functions that need to pick one out of some
 /// options (i.e., classifiers).   Each result represents the likelihood that
-/// the input belongs to the given class, and all outputs some up to 1.
-#[derive(Copy,Clone)]
-pub struct Softmax {}
+/// the input belongs to the given class, and all outputs sum up to 1.
+pub struct OutputClassifier {}
 
-impl FinalLayer for Softmax {
+impl OutputNorm for OutputClassifier {
   fn normalize(xs: &mut [R]) {
     let tot = xs.iter().map(|x| x.exp()).sum::<R>();
     for i in 0 .. xs.len() {
@@ -60,13 +78,13 @@ impl FinalLayer for Softmax {
   }
   fn error_delta(actual: &[R], expected: &mut [R]) {
     for i in 0 .. actual.len() {
-      expected[i] = actual[i] - expected[i];
+      let a = actual[i];
+      expected[i] = sigmoid_dy(a) * (a - expected[i]);
     }
   }
 }
 
-/// Activation function for a neuron.  Used to normalize each neuron's
-/// output.
+// Activation function for a neuron.  Used to normalize each neuron's output.
 fn sigmoid(x: R) -> R {
   1.0 / (1.0 + (-x).exp())
 }
@@ -76,22 +94,6 @@ fn sigmoid(x: R) -> R {
 // rather than the input
 fn sigmoid_dy(y: R) -> R {
   y * (1.0 - y)
-}
-
-/// Loss function.  We use half of the sum of squares of the pointwise errors.
-pub fn loss(ys_actual: &[R], ys_expected: &[R]) -> R {
-  ys_expected.iter().zip(ys_actual.iter())
-    .map(|(a,b)| (a - b) * (a - b)).sum::<R>() * 0.5
-}
-
-// How the loos function changes when each of its inputs are changed.
-// The first argument contains bias.
-// The second argument takes the expected results,
-// and returns the gradient.
-fn loss_dx(ys_actual: &[R], ys_expected: &mut [R]) {
-  for i in 1 .. ys_actual.len() {
-    ys_expected[i - 1] = ys_actual[i] - ys_expected[i - 1];
-  }
 }
 
 // Assumes `xs` contains a bias input (1)
@@ -131,7 +133,7 @@ fn layer(ns: &[Neuron], xs: &[R], res: &mut [R]) {
 
 // There's no bias in the last layer's output, and we normalize
 // the outputs in a custom way.
-fn last_layer<T: FinalLayer>(ns: &[Neuron], xs: &[R], res: &mut [R]) {
+fn last_layer<T: OutputNorm>(ns: &[Neuron], xs: &[R], res: &mut [R]) {
   for (ws,tgt) in ns.iter().zip(res.iter_mut()) {
     *tgt = linear(ws.as_slice(), xs)
   }
@@ -155,7 +157,6 @@ fn lin_layer_dw(xs: &[R], d_err: &[R], d_ns: &mut [Vec<R>]) {
   };
 }
 
-// XXX
 // Assumes `xs` contains a bias input
 // In the last layer a neuron is connected only to a single input of the error function.
 fn last_lin_layer_dw(xs: &[R], gs_dy: &[R], d_ns: &mut [Vec<R>]) {
@@ -173,7 +174,6 @@ fn lin_layer_dx(ns: &[Neuron], d_err: &[R], d_xs: &mut [R]) {
   
 }
 
-// XXX
 // Compute derivative wrt to inputs (not counting bias)
 fn last_lin_layer_dx(ns: &[Neuron], d_err: &[R], d_xs: &mut [R]) {
   
@@ -187,16 +187,16 @@ fn last_lin_layer_dx(ns: &[Neuron], d_err: &[R], d_xs: &mut [R]) {
 /// Geometry of a neural net.
 #[derive(Copy,Clone,Debug)]
 pub struct Dim {
-  /// Number of inputs to the net
+  /// Number of inputs to the net.
   pub inputs: usize,
 
-  /// Number of results produced by the net
+  /// Number of results produced by the net.
   pub outputs: usize,
 
-  /// How many hidden layers we have
+  /// How many hidden layers we have.
   pub hidden: usize,
 
-  /// How big is each hidden layer
+  /// How big is each hidden layer.
   pub hidden_size: usize
 }
 
@@ -252,7 +252,7 @@ impl Weights {
     self.layers.iter_mut()
   }
 
-  /// Get the dimension of this net
+  /// Get the dimension of this net.
   pub fn dim(&self) -> Dim {
     Dim {
       inputs: self.input_size(),
@@ -327,7 +327,7 @@ impl Weights {
     }
   }
 
-  /// Print the network to stdout (for debugging).
+  /// Print the network to stdout.  This is mostly useful for debugging.
   pub fn print(&self) {
     let last = self.layer_num() - 1;
     for (i,l) in self.iter().enumerate() {
@@ -350,44 +350,52 @@ impl Weights {
 
 
 /// Infrastructure for evaluating a net, without the weights.
-pub struct RunnerEmpty { buf1: Vec<R>, buf2: Vec<R> }
+pub struct RunnerState { buf1: Vec<R>, buf2: Vec<R> }
 
-/// A neural net that can be used to map inputs to outputs.
-pub struct RunnerReady<'a, T> { net: &'a Weights, _norm: T, buf1: Vec<R>, buf2: Vec<R> }
-
-
-impl RunnerEmpty {
+impl RunnerState {
   pub fn new() -> Self {
-    RunnerEmpty { buf1: vec![], buf2: vec![] }
+    RunnerState { buf1: vec![], buf2: vec![] }
   }
 
-  pub fn set_weights<T>(mut self, norm: T, net: &Weights) -> RunnerReady<T> {
+  pub fn set_weights<T>(mut self, net: &Weights) -> Runner<T> {
     let size = 1 + std::cmp::max(net.input_size(), std::cmp::max(net.hidden_size(), net.output_size()));
     self.buf1.resize(size, 0.0);
     self.buf2.resize(size, 0.0);
-    RunnerReady { net:net, buf1: self.buf1, buf2: self.buf2, _norm: norm }
+    Runner { net:net, state: self, _norm: PhantomData }
   } 
 }
 
-impl<'a, T:FinalLayer> RunnerReady<'a, T> {
 
-  pub fn clear_net(self) -> RunnerEmpty {
-    RunnerEmpty { buf1: self.buf1, buf2: self.buf2 }
-  }
+/// A neural net that can be used to map inputs to outputs.
+pub struct Runner<'a, T> { net: &'a Weights, _norm: PhantomData<T>, state: RunnerState }
+
+impl<'a, T: OutputNorm> Runner<'a, T> {
+
+  /// Forget the weights, just keep the runner state for later use.
+  pub fn clear_net(self) -> RunnerState { self.state }
 
   /// Get a reference to fill in the input to the net.
   pub fn set_input(&mut self) -> &mut[R] {
-    let b = self.buf1.as_mut_slice();
+    let b = self.state.buf1.as_mut_slice();
     b[0] = 1.0;
     &mut b[1 ..= self.net.input_size()]
+  }
+
+  /// Get the inputs and outputs for the given layer number.
+  fn get_in_out(&mut self, i: usize) -> (&[R], &mut [R]) {
+    if i & 1 == 0 {
+      (self.state.buf1.as_slice(), self.state.buf2.as_mut_slice())
+    } else {
+      (self.state.buf2.as_slice(), self.state.buf1.as_mut_slice())
+    }
   }
 
   /// Evaluate the net on the current input.
   pub fn eval(&mut self) {
     let last = self.net.layer_num() - 1;
     for (i,l) in self.net.iter().enumerate() {
-      let (rd,wt) = if i & 1 == 0 { (self.buf1.as_slice(), self.buf2.as_mut_slice()) }
-                             else { (self.buf2.as_slice(), self.buf1.as_mut_slice()) };
+      let (rd,wt) = self.get_in_out(i);
+      // XXX: Avoid this `if` on each iteration
       if i == last {
         last_layer::<T>(l.as_slice(), rd, wt);
       } else {
@@ -399,9 +407,9 @@ impl<'a, T:FinalLayer> RunnerReady<'a, T> {
   /// Get the output of the net.
   pub fn get_output(&self) -> &[R] {
     let r = if self.net.layer_num() & 1 == 0 {
-              self.buf1.as_slice()
+              self.state.buf1.as_slice()
             } else {
-              self.buf2.as_slice()
+              self.state.buf2.as_slice()
             };
     &r[0 .. self.net.output_size()]
   }
@@ -409,9 +417,9 @@ impl<'a, T:FinalLayer> RunnerReady<'a, T> {
 }
 
 /// A neural net in training.
-pub struct Learner {
-  net:      Weights,            // weights
-  d_layers: Weights,            // weight gradients
+pub struct Learner<T> {
+  net:      Weights,        // weights
+  d_layers: Weights,        // weight gradients
   batches: R,               // how many samples are in the (gradient for batching)
 
   /// Determines how much to change the net's state based on a batch
@@ -419,16 +427,20 @@ pub struct Learner {
   pub learning_rate: R,
 
   // The first one is for input, the rest are for the outputs of the layers.
-  // Note that all vectors are 1 longer to accommodate for bias
+  // Note that all vectors are 1 longer to accommodate for bias.
+  // The last vector contains the output, without bias.
   buffers: Vec<Vec<R>>,
   
-  // Intermediate layer gradient buffers (swap)
+  // Error gradient buffers (swap)
   gbuf1: Vec<R>,
-  gbuf2: Vec<R>
+  gbuf2: Vec<R>,
+
+  // How to normalize output
+  _norm: PhantomData<T>
 }
 
 
-impl Learner {
+impl<T: OutputNorm> Learner<T> {
 
   /// Create a trainer for the given net.
   pub fn new(net: Weights) -> Self {
@@ -448,6 +460,7 @@ impl Learner {
       buffers:    bufs,
       gbuf1:      vec![0.0; size],
       gbuf2:      vec![0.0; size],
+      _norm:      PhantomData
     }
   }
 
@@ -493,11 +506,17 @@ impl Learner {
   /// Evaluate the net.  After, the first buffer contains the net inputs,
   /// and the rest contain the outputs of the layers.
   fn eval(&mut self) {
+    let last = self.net.layer_num() - 1;
     for(i,l) in self.net.layers.iter().enumerate() {
       let (xs,ys) = self.buffers.as_mut_slice().split_at_mut(i+1);
       let rd = xs.last().unwrap().as_slice();
       let wt = ys[0].as_mut_slice();
-      layer(l, rd, wt);
+      // XXX: avoid if
+      if i == last {
+        last_layer::<T>(l, rd, wt);
+      } else {
+        layer(l, rd, wt);
+      }
     }
   }
 
@@ -511,8 +530,7 @@ impl Learner {
 
     let (((last_is, last_os), last_ns), last_dns) = steps.next().unwrap();
 
-    loss_dx(last_os, self.gbuf1.as_mut_slice());
-    actuator_layer_delta(last_os, self.gbuf1.as_mut_slice());
+    T::error_delta(&last_os[0..self.net.output_size()], self.gbuf1.as_mut_slice());
     last_lin_layer_dw(last_is, self.gbuf1.as_slice(), last_dns.as_mut_slice());
     last_lin_layer_dx(last_ns.as_slice(), self.gbuf1.as_slice(), self.gbuf2.as_mut_slice());
 
@@ -527,10 +545,7 @@ impl Learner {
     }
   }
 
-
-// r = phi(w1 + x*w2) * w3 + w4
-
-  /// The current state of the net
+  /// The current state of the net.
   pub fn get_weights(&self) -> &Weights { &self.net }
 
   /// Extract net and destroy training infrastructure.

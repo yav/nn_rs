@@ -1,13 +1,11 @@
 use nn;
 
-/*
 
-
-fn check(buf: nn::RunnerEmpty, net: &nn::Learner) -> (nn::R, nn::RunnerEmpty) {
-  let mut r = buf.set_weights(net.get_weights());
+fn check<T: nn::OutputNorm>(buf: nn::RunnerState, net: &nn::Learner<T>) -> (nn::R, nn::RunnerState) {
+  let mut r = buf.set_weights::<T>(net.get_weights());
   r.set_input()[0] = 0.0;
   r.eval();
-  (nn::loss(r.get_output(),&[0.0]), r.clear_net())
+  (T::error(r.get_output(),&[0.0]), r.clear_net())
 }
 
 pub fn main() {
@@ -21,13 +19,14 @@ pub fn main() {
   n.randomize(0.0,1.0);
   // n.print();
 
-  let mut r = nn::RunnerEmpty::new();
+  let mut r = nn::RunnerState::new();
 
-  let mut l = nn::Learner::new(n);
+  type O = nn::OutputBitVec;
+  let mut l = nn::Learner::<O>::new(n);
   l.learning_rate = 1.0;
 
   
-  for e in 0 .. 1000000 {
+  for _e in 0 .. 1000000 {
     //println!("Step {}", e);
     //l.get_weights().print();
     let (err1,r1) = check(r, &l);
@@ -44,12 +43,9 @@ pub fn main() {
 
   n = l.complete();
   n.print();
-  let mut r = r.set_weights(&n);
+  let mut r = r.set_weights::<O>(&n);
   r.set_input()[0] = 0.0;
   r.eval();
   println!("RES: {}", r.get_output()[0]);
 }
 
-  */
-
-pub fn main() {}
