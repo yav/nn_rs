@@ -12,20 +12,18 @@ type Layer  = Vec<Neuron>;  // a bunch of neurons sharing input
 /// How to compute the output of the net, and check for error.
 pub trait FinalLayer {
   /// Normalize the given results.
-  /// First element of `ys` is bias.
   fn normalize(ys: &mut [R]);
 
   /// Compute the error for the given results.
-  /// `actual` and `expected` DO  NOT contain bias.
   fn error(actual: &[R], expected: &[R]) -> R;
 
   /// Compute the error gradient.   The error gradient is returned in
   /// the location where the expected values were provided.
-  /// First element of `actual` iss bias, `expected` does not have bias.
   fn error_delta(actual: &[R], expected: &mut[R]);
 }
 
 /// Don't normalize the outputs, and use square error loss.
+#[derive(Copy,Clone)]
 pub struct Direct {}
 
 impl FinalLayer for Direct {
@@ -36,8 +34,8 @@ impl FinalLayer for Direct {
     .map(|(a,b)| (a - b) * (a - b)).sum::<R>() * 0.5
   }
   fn error_delta(actual: &[R], expected: &mut [R]) {
-    for i in 1 .. actual.len() {
-      expected[i - 1] = actual[i] - expected[i - 1];
+    for i in 0 .. actual.len() {
+      expected[i] = actual[i] - expected[i];
     }
   }
 }
@@ -47,12 +45,13 @@ impl FinalLayer for Direct {
 /// This is suitable for functions that need to pick one out of some
 /// options (i.e., classifiers).   Each result represents the likelihood that
 /// the input belongs to the given class, and all outputs some up to 1.
+#[derive(Copy,Clone)]
 pub struct Softmax {}
 
 impl FinalLayer for Softmax {
   fn normalize(xs: &mut [R]) {
-    let tot = xs.iter().skip(1).map(|x| x.exp()).sum::<R>();
-    for i in 1 .. xs.len() {
+    let tot = xs.iter().map(|x| x.exp()).sum::<R>();
+    for i in 0 .. xs.len() {
       xs[i] = xs[i].exp() / tot; 
     }
   }
@@ -60,8 +59,8 @@ impl FinalLayer for Softmax {
     - actual.iter().zip(expected.iter()).map(|(x,t)| t * x.ln()).sum::<R>()
   }
   fn error_delta(actual: &[R], expected: &mut [R]) {
-    for i in 1 .. actual.len() {
-      expected[i - 1] = actual[i] - expected[i - 1];
+    for i in 0 .. actual.len() {
+      expected[i] = actual[i] - expected[i];
     }
   }
 }
@@ -130,6 +129,15 @@ fn layer(ns: &[Neuron], xs: &[R], res: &mut [R]) {
   }
 }
 
+// There's no bias in the last layer's output, and we normalize
+// the outputs in a custom way.
+fn last_layer<T: FinalLayer>(ns: &[Neuron], xs: &[R], res: &mut [R]) {
+  for (ws,tgt) in ns.iter().zip(res.iter_mut()) {
+    *tgt = linear(ws.as_slice(), xs)
+  }
+  T::normalize(res);
+}
+
 
 // Update the error gradient to account for changes due to the actuators.
 // `ys` is the results of the layer (i.e., the normalized value).
@@ -147,6 +155,7 @@ fn lin_layer_dw(xs: &[R], d_err: &[R], d_ns: &mut [Vec<R>]) {
   };
 }
 
+// XXX
 // Assumes `xs` contains a bias input
 // In the last layer a neuron is connected only to a single input of the error function.
 fn last_lin_layer_dw(xs: &[R], gs_dy: &[R], d_ns: &mut [Vec<R>]) {
@@ -164,6 +173,7 @@ fn lin_layer_dx(ns: &[Neuron], d_err: &[R], d_xs: &mut [R]) {
   
 }
 
+// XXX
 // Compute derivative wrt to inputs (not counting bias)
 fn last_lin_layer_dx(ns: &[Neuron], d_err: &[R], d_xs: &mut [R]) {
   
@@ -343,7 +353,7 @@ impl Weights {
 pub struct RunnerEmpty { buf1: Vec<R>, buf2: Vec<R> }
 
 /// A neural net that can be used to map inputs to outputs.
-pub struct RunnerReady<'a> { net: &'a Weights, buf1: Vec<R>, buf2: Vec<R> }
+pub struct RunnerReady<'a, T> { net: &'a Weights, _norm: T, buf1: Vec<R>, buf2: Vec<R> }
 
 
 impl RunnerEmpty {
@@ -351,15 +361,15 @@ impl RunnerEmpty {
     RunnerEmpty { buf1: vec![], buf2: vec![] }
   }
 
-  pub fn set_weights(mut self, net: &Weights) -> RunnerReady {
+  pub fn set_weights<T>(mut self, norm: T, net: &Weights) -> RunnerReady<T> {
     let size = 1 + std::cmp::max(net.input_size(), std::cmp::max(net.hidden_size(), net.output_size()));
     self.buf1.resize(size, 0.0);
     self.buf2.resize(size, 0.0);
-    RunnerReady { net:net, buf1: self.buf1, buf2: self.buf2 }
+    RunnerReady { net:net, buf1: self.buf1, buf2: self.buf2, _norm: norm }
   } 
 }
 
-impl<'a> RunnerReady<'a> {
+impl<'a, T:FinalLayer> RunnerReady<'a, T> {
 
   pub fn clear_net(self) -> RunnerEmpty {
     RunnerEmpty { buf1: self.buf1, buf2: self.buf2 }
@@ -374,10 +384,15 @@ impl<'a> RunnerReady<'a> {
 
   /// Evaluate the net on the current input.
   pub fn eval(&mut self) {
+    let last = self.net.layer_num() - 1;
     for (i,l) in self.net.iter().enumerate() {
       let (rd,wt) = if i & 1 == 0 { (self.buf1.as_slice(), self.buf2.as_mut_slice()) }
                              else { (self.buf2.as_slice(), self.buf1.as_mut_slice()) };
-      layer(l.as_slice(), rd, wt);
+      if i == last {
+        last_layer::<T>(l.as_slice(), rd, wt);
+      } else {
+        layer(l.as_slice(), rd, wt);
+      }
     }
   }
 
@@ -388,7 +403,7 @@ impl<'a> RunnerReady<'a> {
             } else {
               self.buf2.as_slice()
             };
-    &r[1 ..= self.net.output_size()]
+    &r[0 .. self.net.output_size()]
   }
 
 }

@@ -1,5 +1,6 @@
 use nn;
 
+/*
 
 
 fn check(buf: nn::RunnerEmpty, net: &nn::Learner) -> (nn::R, nn::RunnerEmpty) {
@@ -48,3 +49,7 @@ pub fn main() {
   r.eval();
   println!("RES: {}", r.get_output()[0]);
 }
+
+  */
+
+pub fn main() {}
