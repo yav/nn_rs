@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["Dim","Learner","OutputBitVec","OutputClassifier","OutputVec","Runner","RunnerState","Weights"],"trait":["OutputNorm"],"type":["R"]};
+window.SIDEBAR_ITEMS = {"mod":["output"],"struct":["Dim","Runner","RunnerState","Trainer","Weights"],"type":["R"]};

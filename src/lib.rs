@@ -1,100 +1,24 @@
+//! Functions for training and evaluating neural nets.
+
+
 use std::io::{Read, Write};
 use std::marker::PhantomData;
 use rand::Rng;
 use rand::distr::Uniform;
+use crate::common::{sigmoid,sigmoid_dy};
+use crate::output::Norm;
 
-/// The type of net weights, inputs, and outputs.
-pub type R = f32;
 
 type Neuron = Vec<R>;       // defined by weights
 type Layer  = Vec<Neuron>;  // a bunch of neurons sharing input
 
+/// The type of net weights, inputs, and outputs.
+pub type R = crate::common::R;
 
-/// How to compute and validate the output of the net.
-pub trait OutputNorm {
-  /// Normalize the given results.
-  fn normalize(ys: &mut [R]);
+mod common;
 
-  /// Compute the error for the given results.
-  fn error(actual: &[R], expected: &[R]) -> R;
-
-  /// Compute the error gradient.   The error gradient is returned in
-  /// the location where the expected values were provided.
-  fn error_delta(actual: &[R], expected: &mut[R]);
-}
-
-/// Don't normalize the outputs, and use square error loss.
-pub struct OutputVec {}
-
-impl OutputNorm for OutputVec {
-  fn normalize(_xs: &mut [R]) {}
-
-  fn error(actual: &[R], expected: &[R]) -> R {
-    expected.iter().zip(actual.iter())
-    .map(|(a,b)| (a - b) * (a - b)).sum::<R>() * 0.5
-  }
-  fn error_delta(actual: &[R], expected: &mut [R]) {
-    for i in 0 .. actual.len() {
-      expected[i] = actual[i] - expected[i];
-    }
-  }
-}
-
-/// Normalize the outputs with sigmoid, and use square error loss.
-pub struct OutputBitVec {}
-
-impl OutputNorm for OutputBitVec {
-  fn normalize(ys: &mut [R]) {
-    for y in ys.iter_mut() {
-      *y = sigmoid(*y);
-    }
-  }
-  fn error(actual: &[R], expected: &[R]) -> R {
-    OutputVec::error(actual, expected)
-  }
-  fn error_delta(actual: &[R], expected: &mut[R]) {
-    for i in 0 .. actual.len() {
-      expected[i] = actual[i] - expected[i];
-    } 
-  }
-}
-
-
-/// Normalize outputs with softmax, and use cross-entropy loss.
-/// This is suitable for functions that need to pick one out of some
-/// options (i.e., classifiers).   Each result represents the likelihood that
-/// the input belongs to the given class, and all outputs sum up to 1.
-pub struct OutputClassifier {}
-
-impl OutputNorm for OutputClassifier {
-  fn normalize(xs: &mut [R]) {
-    let tot = xs.iter().map(|x| x.exp()).sum::<R>();
-    for i in 0 .. xs.len() {
-      xs[i] = xs[i].exp() / tot; 
-    }
-  }
-  fn error(actual: &[R], expected: &[R]) -> R {
-    - actual.iter().zip(expected.iter()).map(|(x,t)| t * x.ln()).sum::<R>()
-  }
-  fn error_delta(actual: &[R], expected: &mut [R]) {
-    for i in 0 .. actual.len() {
-      let a = actual[i];
-      expected[i] = sigmoid_dy(a) * (a - expected[i]);
-    }
-  }
-}
-
-// Activation function for a neuron.  Used to normalize each neuron's output.
-fn sigmoid(x: R) -> R {
-  1.0 / (1.0 + (-x).exp())
-}
-
-// Derivative of activation function.
-// Note that this is in terms of the *output* of the function,
-// rather than the input
-fn sigmoid_dy(y: R) -> R {
-  y * (1.0 - y)
-}
+/// Specifies how to normalize and validate the result of a network.
+pub mod output;
 
 // Assumes `xs` contains a bias input (1)
 fn linear(ws: &[R], xs: &[R]) -> R {
@@ -133,7 +57,7 @@ fn layer(ns: &[Neuron], xs: &[R], res: &mut [R]) {
 
 // There's no bias in the last layer's output, and we normalize
 // the outputs in a custom way.
-fn last_layer<T: OutputNorm>(ns: &[Neuron], xs: &[R], res: &mut [R]) {
+fn last_layer<T: Norm>(ns: &[Neuron], xs: &[R], res: &mut [R]) {
   for (ws,tgt) in ns.iter().zip(res.iter_mut()) {
     *tgt = linear(ws.as_slice(), xs)
   }
@@ -357,7 +281,7 @@ impl RunnerState {
     RunnerState { buf1: vec![], buf2: vec![] }
   }
 
-  pub fn set_weights<T>(mut self, net: &Weights) -> Runner<T> {
+  pub fn set_weights<T: Norm>(mut self, net: &Weights) -> Runner<T> {
     let size = 1 + std::cmp::max(net.input_size(), std::cmp::max(net.hidden_size(), net.output_size()));
     self.buf1.resize(size, 0.0);
     self.buf2.resize(size, 0.0);
@@ -367,9 +291,12 @@ impl RunnerState {
 
 
 /// A neural net that can be used to map inputs to outputs.
-pub struct Runner<'a, T> { net: &'a Weights, _norm: PhantomData<T>, state: RunnerState }
+pub struct Runner<'a, T: Norm> { net: &'a Weights, _norm: PhantomData<T>, state: RunnerState }
 
-impl<'a, T: OutputNorm> Runner<'a, T> {
+impl<'a, T: Norm> Runner<'a, T> {
+
+  /// Crate a new runner using the given weights.
+  pub fn new(ws: &'a Weights) -> Self { RunnerState::new().set_weights(ws) }
 
   /// Forget the weights, just keep the runner state for later use.
   pub fn clear_net(self) -> RunnerState { self.state }
@@ -417,7 +344,7 @@ impl<'a, T: OutputNorm> Runner<'a, T> {
 }
 
 /// A neural net in training.
-pub struct Learner<T> {
+pub struct Trainer<T: Norm> {
   net:      Weights,        // weights
   d_layers: Weights,        // weight gradients
   batches: R,               // how many samples are in the (gradient for batching)
@@ -440,7 +367,7 @@ pub struct Learner<T> {
 }
 
 
-impl<T: OutputNorm> Learner<T> {
+impl<T: Norm> Trainer<T> {
 
   /// Create a trainer for the given net.
   pub fn new(net: Weights) -> Self {
@@ -450,7 +377,7 @@ impl<T: OutputNorm> Learner<T> {
     bufs.push(vec![0.0; dim.inputs + 1]);
     for _ in 0 ..= dim.hidden { bufs.push(vec![0.0; dim.hidden_size + 1]) }
     bufs.push(vec![0.0; dim.outputs + 1]);
-    Learner {
+    Trainer {
       net:        net,
       d_layers:   Weights::new(dim, 0.0),
       batches:    0.0,
@@ -490,6 +417,7 @@ impl<T: OutputNorm> Learner<T> {
   }
 
   /// Update the net's state based on the examples in the current batch.
+  /// The amount of change depends on the [learning rate][`Trainer::learning_rate`].
   pub fn finish_batch(&mut self) {
     let scale = self.learning_rate / self.batches;
     for (l,dl) in self.net.iter_mut().zip(self.d_layers.iter_mut()) {

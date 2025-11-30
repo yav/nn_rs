@@ -1,7 +1,7 @@
 use nn;
 
 
-fn check<T: nn::OutputNorm>(buf: nn::RunnerState, net: &nn::Learner<T>) -> (nn::R, nn::RunnerState) {
+fn check<T: nn::output::Norm>(buf: nn::RunnerState, net: &nn::Trainer<T>) -> (nn::R, nn::RunnerState) {
   let mut r = buf.set_weights::<T>(net.get_weights());
   r.set_input()[0] = 0.0;
   r.eval();
@@ -21,8 +21,8 @@ pub fn main() {
 
   let mut r = nn::RunnerState::new();
 
-  type O = nn::OutputBitVec;
-  let mut l = nn::Learner::<O>::new(n);
+  type O = nn::output::BitVec;
+  let mut l = nn::Trainer::<O>::new(n);
   l.learning_rate = 1.0;
 
   
