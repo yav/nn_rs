@@ -43,6 +43,32 @@ fn last_layer<T: Norm>(ns: &[Neuron], xs: &[R], res: &mut [R]) {
 }
 
 
+
+// We need to know how to do this to run a net.
+trait NetRunner {
+  // How to normalize output
+  type OutNorm: Norm;
+
+  // How many layers are in the net
+  fn layer_num(&self) -> usize;
+
+  // Get the given layer, its input, and its output buffer.
+  fn get_in_out(&mut self, i: usize) -> (&[Neuron], &[R], &mut [R]);
+}
+
+
+// Common code for evaluating a net.  Used both by the runner and the trainer.
+fn eval<R: NetRunner>(r: &mut R) {
+  let last = r.layer_num() - 1;
+  for i in 0 .. last {
+    let (l, rd, wt) = r.get_in_out(i);
+    layer(l, rd, wt);
+  }
+  let (l, rd, wt) = r.get_in_out(last);
+  last_layer::<R::OutNorm>(l, rd, wt);
+}
+
+
 // Update the error gradient to account for changes due to the actuators.
 // `ys` is the results of the layer (i.e., the normalized value).
 // The first element is bias
@@ -120,6 +146,8 @@ impl Weights {
   fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item=&mut Layer> {
     self.layers.iter_mut()
   }
+
+  fn layer(&self, i: usize) -> &[Neuron] { self.layers[i].as_slice() }
 
   /// Get the dimension of this net.
   pub fn dim(&self) -> Dim {
@@ -238,6 +266,21 @@ impl RunnerState {
 /// A neural net that can be used to map inputs to outputs.
 pub struct Runner<'a, T: Norm> { net: &'a Weights, _norm: PhantomData<T>, state: RunnerState }
 
+impl<'a, T: Norm> NetRunner for Runner<'a, T> {
+  type OutNorm = T;
+
+  fn layer_num(&self) -> usize { self.net.layer_num() }
+
+  /// Get the given layer, its inputs and outputs.
+  fn get_in_out(&mut self, i: usize) -> (&[Neuron], &[R], &mut [R]) {
+    if i & 1 == 0 {
+      (self.net.layer(i), self.state.buf1.as_slice(), self.state.buf2.as_mut_slice())
+    } else {
+      (self.net.layer(i), self.state.buf2.as_slice(), self.state.buf1.as_mut_slice())
+    }
+  }
+}
+
 impl<'a, T: Norm> Runner<'a, T> {
 
   /// Crate a new runner using the given weights.
@@ -253,28 +296,8 @@ impl<'a, T: Norm> Runner<'a, T> {
     &mut b[1 ..= self.net.input_size()]
   }
 
-  /// Get the inputs and outputs for the given layer number.
-  fn get_in_out(&mut self, i: usize) -> (&[R], &mut [R]) {
-    if i & 1 == 0 {
-      (self.state.buf1.as_slice(), self.state.buf2.as_mut_slice())
-    } else {
-      (self.state.buf2.as_slice(), self.state.buf1.as_mut_slice())
-    }
-  }
-
   /// Evaluate the net on the current input.
-  pub fn eval(&mut self) {
-    let last = self.net.layer_num() - 1;
-    for (i,l) in self.net.iter().enumerate() {
-      let (rd,wt) = self.get_in_out(i);
-      // XXX: Avoid this `if` on each iteration
-      if i == last {
-        last_layer::<T>(l.as_slice(), rd, wt);
-      } else {
-        layer(l.as_slice(), rd, wt);
-      }
-    }
-  }
+  pub fn eval(&mut self) { eval(self) }
 
   /// Get the output of the net.
   pub fn get_output(&self) -> &[R] {
@@ -311,6 +334,17 @@ pub struct Trainer<T: Norm> {
   _norm: PhantomData<T>
 }
 
+
+impl<T: Norm> NetRunner for Trainer<T> {
+  type OutNorm = T;
+
+  fn layer_num(&self) -> usize { self.net.layer_num() }
+  
+  fn get_in_out(&mut self, i: usize) -> (&[Neuron], &[R], &mut [R]) {
+    let (xs,ys) = self.buffers.as_mut_slice().split_at_mut(i+1);
+    (self.net.layer(i), xs.last().unwrap().as_slice(), ys[0].as_mut_slice())
+  }
+}
 
 impl<T: Norm> Trainer<T> {
 
@@ -356,7 +390,7 @@ impl<T: Norm> Trainer<T> {
   /// one can do multiple examples, and update the net as the average
   /// of the change from all examples.
   pub fn train(&mut self) {
-    self.eval();
+    eval(self);
     self.backprop();
     self.batches += 1.0;
   }
@@ -376,24 +410,7 @@ impl<T: Norm> Trainer<T> {
     self.batches = 0.0;
   }
 
-  /// Evaluate the net.  After, the first buffer contains the net inputs,
-  /// and the rest contain the outputs of the layers.
-  fn eval(&mut self) {
-    let last = self.net.layer_num() - 1;
-    for(i,l) in self.net.layers.iter().enumerate() {
-      let (xs,ys) = self.buffers.as_mut_slice().split_at_mut(i+1);
-      let rd = xs.last().unwrap().as_slice();
-      let wt = ys[0].as_mut_slice();
-      // XXX: avoid if
-      if i == last {
-        last_layer::<T>(l, rd, wt);
-      } else {
-        layer(l, rd, wt);
-      }
-    }
-  }
 
-  
   fn backprop(&mut self) {
     let ins       = self.buffers.iter().map(|x| x.as_slice()).rev();
     let outs      = self.buffers.iter().skip(1).map(|x| x.as_slice()).rev();

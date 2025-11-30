@@ -442,57 +442,18 @@
 <a href="#441" id="441">441</a>
 <a href="#442" id="442">442</a>
 <a href="#443" id="443">443</a>
-<a href="#444" id="444">444</a>
-<a href="#445" id="445">445</a>
-<a href="#446" id="446">446</a>
-<a href="#447" id="447">447</a>
-<a href="#448" id="448">448</a>
-<a href="#449" id="449">449</a>
-<a href="#450" id="450">450</a>
-<a href="#451" id="451">451</a>
-<a href="#452" id="452">452</a>
-<a href="#453" id="453">453</a>
-<a href="#454" id="454">454</a>
-<a href="#455" id="455">455</a>
-<a href="#456" id="456">456</a>
-<a href="#457" id="457">457</a>
-<a href="#458" id="458">458</a>
-<a href="#459" id="459">459</a>
-<a href="#460" id="460">460</a>
-<a href="#461" id="461">461</a>
-<a href="#462" id="462">462</a>
-<a href="#463" id="463">463</a>
-<a href="#464" id="464">464</a>
-<a href="#465" id="465">465</a>
-<a href="#466" id="466">466</a>
-<a href="#467" id="467">467</a>
-<a href="#468" id="468">468</a>
-<a href="#469" id="469">469</a>
-<a href="#470" id="470">470</a>
-<a href="#471" id="471">471</a>
-<a href="#472" id="472">472</a>
-<a href="#473" id="473">473</a>
-<a href="#474" id="474">474</a>
-<a href="#475" id="475">475</a>
-<a href="#476" id="476">476</a>
-<a href="#477" id="477">477</a>
-<a href="#478" id="478">478</a>
-<a href="#479" id="479">479</a>
-<a href="#480" id="480">480</a>
-<a href="#481" id="481">481</a>
-<a href="#482" id="482">482</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for training and evaluating neural nets.
+<a href="#444" id="444">444</a></pre></div><pre class="rust"><code><span class="doccomment">//! Functions for training and evaluating neural nets.
 
 
 </span><span class="kw">use </span>std::io::{Read, Write};
 <span class="kw">use </span>std::marker::PhantomData;
 <span class="kw">use </span>rand::Rng;
 <span class="kw">use </span>rand::distr::Uniform;
-<span class="kw">use </span><span class="kw">crate</span>::common::{sigmoid,sigmoid_dy};
+<span class="kw">use </span><span class="kw">crate</span>::common::<span class="kw-2">*</span>;
 <span class="kw">use </span><span class="kw">crate</span>::output::Norm;
 
 
-<span class="kw">type </span>Neuron = Vec&lt;R&gt;;       <span class="comment">// defined by weights
-</span><span class="kw">type </span>Layer  = Vec&lt;Neuron&gt;;  <span class="comment">// a bunch of neurons sharing input
+<span class="kw">type </span>Layer  = Vec&lt;Neuron&gt;;  <span class="comment">// a bunch of neurons sharing input
 
 </span><span class="doccomment">/// The type of net weights, inputs, and outputs.
 </span><span class="kw">pub type </span>R = <span class="kw">crate</span>::common::R;
@@ -503,30 +464,9 @@
 </span><span class="kw">pub mod </span>output;
 
 <span class="comment">// Assumes `xs` contains a bias input (1)
-</span><span class="kw">fn </span>linear(ws: <span class="kw-2">&amp;</span>[R], xs: <span class="kw-2">&amp;</span>[R]) -&gt; R {
-  ws.iter().zip(xs).map(|(x,y)| x * y).sum::&lt;R&gt;()
-}
-
-<span class="comment">// Assumes `xs` contains a bias input (1)
 </span><span class="kw">fn </span>neuron(ws: <span class="kw-2">&amp;</span>[R], xs: <span class="kw-2">&amp;</span>[R]) -&gt; R {
   sigmoid(linear(ws,xs))
 }
-
-<span class="comment">// How error will change if we change the linear part of a neuron neuron.
-//
-// This assumes that inputs and outputs contain bias elements.
-//
-// `other` is the parameter that is fixed (e.g., inputs if changing weights),
-// `y` is the output of the neuron at the point of interest,
-// `d_err` indicate how the error will change wrt to this neuron (i.e., what it is connected to)
-// `delta` is where we place the derivatives.
-</span><span class="kw">fn </span>neuron_lin_delta(other: <span class="kw-2">&amp;</span>[R], d_err: <span class="kw-2">&amp;</span>[R], delta: <span class="kw-2">&amp;mut </span>[R]) {
-  <span class="kw">for </span>i <span class="kw">in </span><span class="number">0 </span>.. other.len() {
-    <span class="kw">let </span>x = other[i];
-    delta[i] += d_err.iter().map(|d| x * <span class="kw-2">*</span>d).sum::&lt;R&gt;();  
-  };
-}
-
 
 <span class="comment">// Assumes `xs` contains a bias input
 // Produces an additional bias result in the first slot of the output
@@ -547,6 +487,32 @@
 }
 
 
+
+<span class="comment">// We need to know how to do this to run a net.
+</span><span class="kw">trait </span>NetRunner {
+  <span class="comment">// How to normalize output
+  </span><span class="kw">type </span>OutNorm: Norm;
+
+  <span class="comment">// How many layers are in the net
+  </span><span class="kw">fn </span>layer_num(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize;
+
+  <span class="comment">// Get the given layer, its input, and its output buffer.
+  </span><span class="kw">fn </span>get_in_out(<span class="kw-2">&amp;mut </span><span class="self">self</span>, i: usize) -&gt; (<span class="kw-2">&amp;</span>[Neuron], <span class="kw-2">&amp;</span>[R], <span class="kw-2">&amp;mut </span>[R]);
+}
+
+
+<span class="comment">// Common code for evaluating a net.  Used both by the runner and the trainer.
+</span><span class="kw">fn </span>eval&lt;R: NetRunner&gt;(r: <span class="kw-2">&amp;mut </span>R) {
+  <span class="kw">let </span>last = r.layer_num() - <span class="number">1</span>;
+  <span class="kw">for </span>i <span class="kw">in </span><span class="number">0 </span>.. last {
+    <span class="kw">let </span>(l, rd, wt) = r.get_in_out(i);
+    layer(l, rd, wt);
+  }
+  <span class="kw">let </span>(l, rd, wt) = r.get_in_out(last);
+  last_layer::&lt;R::OutNorm&gt;(l, rd, wt);
+}
+
+
 <span class="comment">// Update the error gradient to account for changes due to the actuators.
 // `ys` is the results of the layer (i.e., the normalized value).
 // The first element is bias
@@ -554,39 +520,6 @@
   <span class="kw">for </span>i <span class="kw">in </span><span class="number">1 </span>.. ys.len() {
     gs_dy[i - <span class="number">1</span>] <span class="kw-2">*</span>= sigmoid_dy(ys[i]);
   }
-}
-
-<span class="comment">// Assumes `xs` and `ys` contains a bias element.
-</span><span class="kw">fn </span>lin_layer_dw(xs: <span class="kw-2">&amp;</span>[R], d_err: <span class="kw-2">&amp;</span>[R], d_ns: <span class="kw-2">&amp;mut </span>[Vec&lt;R&gt;]) {
-  <span class="kw">for </span>i <span class="kw">in </span><span class="number">0 </span>.. d_ns.len() {
-    neuron_lin_delta(xs, d_err, d_ns[i].as_mut_slice());
-  };
-}
-
-<span class="comment">// Assumes `xs` contains a bias input
-// In the last layer a neuron is connected only to a single input of the error function.
-</span><span class="kw">fn </span>last_lin_layer_dw(xs: <span class="kw-2">&amp;</span>[R], gs_dy: <span class="kw-2">&amp;</span>[R], d_ns: <span class="kw-2">&amp;mut </span>[Vec&lt;R&gt;]) {
-  <span class="kw">for </span>i <span class="kw">in </span><span class="number">0 </span>.. d_ns.len() {
-    neuron_lin_delta(xs, <span class="kw-2">&amp;</span>[gs_dy[i]], d_ns[i].as_mut_slice());
-  };
-}
-
-<span class="comment">// Compute derivative wrt to inputs
-</span><span class="kw">fn </span>lin_layer_dx(ns: <span class="kw-2">&amp;</span>[Neuron], d_err: <span class="kw-2">&amp;</span>[R], d_xs: <span class="kw-2">&amp;mut </span>[R]) {
-  d_xs.fill(<span class="number">0.0</span>);
-  <span class="kw">for </span>i <span class="kw">in </span><span class="number">0 </span>.. ns.len() {
-    neuron_lin_delta(<span class="kw-2">&amp;</span>ns[i].as_slice()[<span class="number">1</span>..], d_err, d_xs);
-  };
-  
-}
-
-<span class="comment">// Compute derivative wrt to inputs (not counting bias)
-</span><span class="kw">fn </span>last_lin_layer_dx(ns: <span class="kw-2">&amp;</span>[Neuron], d_err: <span class="kw-2">&amp;</span>[R], d_xs: <span class="kw-2">&amp;mut </span>[R]) {
-  
-  d_xs.fill(<span class="number">0.0</span>);
-  <span class="kw">for </span>i <span class="kw">in </span><span class="number">0 </span>.. ns.len() {
-    neuron_lin_delta(<span class="kw-2">&amp;</span>ns[i].as_slice()[<span class="number">1</span>..], <span class="kw-2">&amp;</span>[d_err[i]], d_xs);
-  };
 }
 
 
@@ -657,6 +590,8 @@
   <span class="kw">fn </span>iter_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="kw">impl </span>DoubleEndedIterator&lt;Item=<span class="kw-2">&amp;mut </span>Layer&gt; {
     <span class="self">self</span>.layers.iter_mut()
   }
+
+  <span class="kw">fn </span>layer(<span class="kw-2">&amp;</span><span class="self">self</span>, i: usize) -&gt; <span class="kw-2">&amp;</span>[Neuron] { <span class="self">self</span>.layers[i].as_slice() }
 
   <span class="doccomment">/// Get the dimension of this net.
   </span><span class="kw">pub fn </span>dim(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Dim {
@@ -775,6 +710,21 @@
 <span class="doccomment">/// A neural net that can be used to map inputs to outputs.
 </span><span class="kw">pub struct </span>Runner&lt;<span class="lifetime">'a</span>, T: Norm&gt; { net: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>Weights, _norm: PhantomData&lt;T&gt;, state: RunnerState }
 
+<span class="kw">impl</span>&lt;<span class="lifetime">'a</span>, T: Norm&gt; NetRunner <span class="kw">for </span>Runner&lt;<span class="lifetime">'a</span>, T&gt; {
+  <span class="kw">type </span>OutNorm = T;
+
+  <span class="kw">fn </span>layer_num(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize { <span class="self">self</span>.net.layer_num() }
+
+  <span class="doccomment">/// Get the given layer, its inputs and outputs.
+  </span><span class="kw">fn </span>get_in_out(<span class="kw-2">&amp;mut </span><span class="self">self</span>, i: usize) -&gt; (<span class="kw-2">&amp;</span>[Neuron], <span class="kw-2">&amp;</span>[R], <span class="kw-2">&amp;mut </span>[R]) {
+    <span class="kw">if </span>i &amp; <span class="number">1 </span>== <span class="number">0 </span>{
+      (<span class="self">self</span>.net.layer(i), <span class="self">self</span>.state.buf1.as_slice(), <span class="self">self</span>.state.buf2.as_mut_slice())
+    } <span class="kw">else </span>{
+      (<span class="self">self</span>.net.layer(i), <span class="self">self</span>.state.buf2.as_slice(), <span class="self">self</span>.state.buf1.as_mut_slice())
+    }
+  }
+}
+
 <span class="kw">impl</span>&lt;<span class="lifetime">'a</span>, T: Norm&gt; Runner&lt;<span class="lifetime">'a</span>, T&gt; {
 
   <span class="doccomment">/// Crate a new runner using the given weights.
@@ -790,28 +740,8 @@
     <span class="kw-2">&amp;mut </span>b[<span class="number">1 </span>..= <span class="self">self</span>.net.input_size()]
   }
 
-  <span class="doccomment">/// Get the inputs and outputs for the given layer number.
-  </span><span class="kw">fn </span>get_in_out(<span class="kw-2">&amp;mut </span><span class="self">self</span>, i: usize) -&gt; (<span class="kw-2">&amp;</span>[R], <span class="kw-2">&amp;mut </span>[R]) {
-    <span class="kw">if </span>i &amp; <span class="number">1 </span>== <span class="number">0 </span>{
-      (<span class="self">self</span>.state.buf1.as_slice(), <span class="self">self</span>.state.buf2.as_mut_slice())
-    } <span class="kw">else </span>{
-      (<span class="self">self</span>.state.buf2.as_slice(), <span class="self">self</span>.state.buf1.as_mut_slice())
-    }
-  }
-
   <span class="doccomment">/// Evaluate the net on the current input.
-  </span><span class="kw">pub fn </span>eval(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
-    <span class="kw">let </span>last = <span class="self">self</span>.net.layer_num() - <span class="number">1</span>;
-    <span class="kw">for </span>(i,l) <span class="kw">in </span><span class="self">self</span>.net.iter().enumerate() {
-      <span class="kw">let </span>(rd,wt) = <span class="self">self</span>.get_in_out(i);
-      <span class="comment">// XXX: Avoid this `if` on each iteration
-      </span><span class="kw">if </span>i == last {
-        last_layer::&lt;T&gt;(l.as_slice(), rd, wt);
-      } <span class="kw">else </span>{
-        layer(l.as_slice(), rd, wt);
-      }
-    }
-  }
+  </span><span class="kw">pub fn </span>eval(<span class="kw-2">&amp;mut </span><span class="self">self</span>) { eval(<span class="self">self</span>) }
 
   <span class="doccomment">/// Get the output of the net.
   </span><span class="kw">pub fn </span>get_output(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[R] {
@@ -848,6 +778,17 @@
   </span>_norm: PhantomData&lt;T&gt;
 }
 
+
+<span class="kw">impl</span>&lt;T: Norm&gt; NetRunner <span class="kw">for </span>Trainer&lt;T&gt; {
+  <span class="kw">type </span>OutNorm = T;
+
+  <span class="kw">fn </span>layer_num(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize { <span class="self">self</span>.net.layer_num() }
+  
+  <span class="kw">fn </span>get_in_out(<span class="kw-2">&amp;mut </span><span class="self">self</span>, i: usize) -&gt; (<span class="kw-2">&amp;</span>[Neuron], <span class="kw-2">&amp;</span>[R], <span class="kw-2">&amp;mut </span>[R]) {
+    <span class="kw">let </span>(xs,ys) = <span class="self">self</span>.buffers.as_mut_slice().split_at_mut(i+<span class="number">1</span>);
+    (<span class="self">self</span>.net.layer(i), xs.last().unwrap().as_slice(), ys[<span class="number">0</span>].as_mut_slice())
+  }
+}
 
 <span class="kw">impl</span>&lt;T: Norm&gt; Trainer&lt;T&gt; {
 
@@ -893,7 +834,7 @@
   /// one can do multiple examples, and update the net as the average
   /// of the change from all examples.
   </span><span class="kw">pub fn </span>train(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
-    <span class="self">self</span>.eval();
+    eval(<span class="self">self</span>);
     <span class="self">self</span>.backprop();
     <span class="self">self</span>.batches += <span class="number">1.0</span>;
   }
@@ -913,24 +854,7 @@
     <span class="self">self</span>.batches = <span class="number">0.0</span>;
   }
 
-  <span class="doccomment">/// Evaluate the net.  After, the first buffer contains the net inputs,
-  /// and the rest contain the outputs of the layers.
-  </span><span class="kw">fn </span>eval(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
-    <span class="kw">let </span>last = <span class="self">self</span>.net.layer_num() - <span class="number">1</span>;
-    <span class="kw">for</span>(i,l) <span class="kw">in </span><span class="self">self</span>.net.layers.iter().enumerate() {
-      <span class="kw">let </span>(xs,ys) = <span class="self">self</span>.buffers.as_mut_slice().split_at_mut(i+<span class="number">1</span>);
-      <span class="kw">let </span>rd = xs.last().unwrap().as_slice();
-      <span class="kw">let </span>wt = ys[<span class="number">0</span>].as_mut_slice();
-      <span class="comment">// XXX: avoid if
-      </span><span class="kw">if </span>i == last {
-        last_layer::&lt;T&gt;(l, rd, wt);
-      } <span class="kw">else </span>{
-        layer(l, rd, wt);
-      }
-    }
-  }
 
-  
   <span class="kw">fn </span>backprop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
     <span class="kw">let </span>ins       = <span class="self">self</span>.buffers.iter().map(|x| x.as_slice()).rev();
     <span class="kw">let </span>outs      = <span class="self">self</span>.buffers.iter().skip(<span class="number">1</span>).map(|x| x.as_slice()).rev();
