@@ -1,15 +1,15 @@
-use nn;
+use nn::*;
 
-
-fn check<T: nn::output::Norm>(buf: nn::RunnerState, net: &nn::Trainer<T>) -> (nn::R, nn::RunnerState) {
-  let mut r = buf.set_weights::<T>(net.get_weights());
+fn check<N: norm::Norm>
+  (buf: RunnerState, net: &Trainer<N>) -> (R, RunnerState) {
+  let mut r = buf.set_weights::<N>(net.get_weights());
   r.set_input()[0] = 0.0;
   r.eval();
-  (T::error(r.get_output(),&[0.0]), r.clear_net())
+  (N::error(r.get_output(),&[0.0]), r.clear_net())
 }
 
 pub fn main() {
-  let mut n = nn::Weights::new(nn::Dim { 
+  let mut n = Weights::new(Dim { 
      inputs: 1,
      outputs: 1,
      hidden: 0,
@@ -19,10 +19,10 @@ pub fn main() {
   n.randomize(0.0,1.0);
   // n.print();
 
-  let mut r = nn::RunnerState::new();
+  let mut r = RunnerState::new();
 
-  type O = nn::output::BitVec;
-  let mut l = nn::Trainer::<O>::new(n);
+  type N = (norm::ISigmoid, norm::OBitVec);
+  let mut l = nn::Trainer::<N>::new(n);
   l.learning_rate = 1.0;
 
   
@@ -43,7 +43,7 @@ pub fn main() {
 
   n = l.complete();
   n.print();
-  let mut r = r.set_weights::<O>(&n);
+  let mut r = r.set_weights::<N>(&n);
   r.set_input()[0] = 0.0;
   r.eval();
   println!("RES: {}", r.get_output()[0]);

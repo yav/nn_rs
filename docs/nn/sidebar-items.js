@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["output"],"struct":["Dim","Runner","RunnerState","Trainer","Weights"],"type":["R"]};
+window.SIDEBAR_ITEMS = {"mod":["norm"],"struct":["Dim","Runner","RunnerState","Trainer","Weights"],"type":["R"]};

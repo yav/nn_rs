@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 use rand::Rng;
 use rand::distr::Uniform;
 use crate::common::*;
-use crate::output::Norm;
+use crate::norm::{Norm,Internal,Output};
 
 
 type Layer  = Vec<Neuron>;  // a bunch of neurons sharing input
@@ -17,38 +17,31 @@ pub type R = crate::common::R;
 mod common;
 
 /// Specifies how to normalize and validate the result of a network.
-pub mod output;
+pub mod norm;
 
-// Assumes `xs` contains a bias input (1)
-fn neuron(ws: &[R], xs: &[R]) -> R {
-  sigmoid(linear(ws,xs))
-}
 
 // Assumes `xs` contains a bias input
 // Produces an additional bias result in the first slot of the output
-fn layer(ns: &[Neuron], xs: &[R], res: &mut [R]) {
+fn layer<I: Internal>(ns: &[Neuron], xs: &[R], res: &mut [R]) {
   res[0] = 1.0;
   for (ws,tgt) in ns.iter().zip(res[1..].iter_mut()) {
-    *tgt = neuron(ws.as_slice(), xs)
+    *tgt = I::neuron_norm(linear(ws.as_slice(), xs));
   }
 }
 
 // There's no bias in the last layer's output, and we normalize
 // the outputs in a custom way.
-fn last_layer<T: Norm>(ns: &[Neuron], xs: &[R], res: &mut [R]) {
+fn last_layer<O: Output>(ns: &[Neuron], xs: &[R], res: &mut [R]) {
   for (ws,tgt) in ns.iter().zip(res.iter_mut()) {
     *tgt = linear(ws.as_slice(), xs)
   }
-  T::normalize(res);
+  O::normalize(res);
 }
 
 
 
 // We need to know how to do this to run a net.
-trait NetRunner {
-  // How to normalize output
-  type OutNorm: Norm;
-
+trait NetRunner : Norm {
   // How many layers are in the net
   fn layer_num(&self) -> usize;
 
@@ -62,19 +55,19 @@ fn eval<R: NetRunner>(r: &mut R) {
   let last = r.layer_num() - 1;
   for i in 0 .. last {
     let (l, rd, wt) = r.get_in_out(i);
-    layer(l, rd, wt);
+    layer::<R::INorm>(l, rd, wt);
   }
   let (l, rd, wt) = r.get_in_out(last);
-  last_layer::<R::OutNorm>(l, rd, wt);
+  last_layer::<R::ONorm>(l, rd, wt);
 }
 
 
 // Update the error gradient to account for changes due to the actuators.
 // `ys` is the results of the layer (i.e., the normalized value).
 // The first element is bias
-fn actuator_layer_delta(ys: &[R], gs_dy: &mut [R]) {
+fn actuator_layer_delta<I: Internal>(ys: &[R], gs_dy: &mut [R]) {
   for i in 1 .. ys.len() {
-    gs_dy[i - 1] *= sigmoid_dy(ys[i]);
+    gs_dy[i - 1] *= I::neuron_norm_dy(ys[i]);
   }
 }
 
@@ -254,7 +247,7 @@ impl RunnerState {
     RunnerState { buf1: vec![], buf2: vec![] }
   }
 
-  pub fn set_weights<T: Norm>(mut self, net: &Weights) -> Runner<T> {
+  pub fn set_weights<N: Norm>(mut self, net: &Weights) -> Runner<N> {
     let size = 1 + std::cmp::max(net.input_size(), std::cmp::max(net.hidden_size(), net.output_size()));
     self.buf1.resize(size, 0.0);
     self.buf2.resize(size, 0.0);
@@ -262,12 +255,15 @@ impl RunnerState {
   } 
 }
 
+impl<'a, N: Norm> Norm for Runner<'a, N> {
+  type INorm = N::INorm;
+  type ONorm = N::ONorm;
+}
 
 /// A neural net that can be used to map inputs to outputs.
-pub struct Runner<'a, T: Norm> { net: &'a Weights, _norm: PhantomData<T>, state: RunnerState }
+pub struct Runner<'a, N: Norm> { net: &'a Weights, _norm: PhantomData<N>, state: RunnerState }
 
-impl<'a, T: Norm> NetRunner for Runner<'a, T> {
-  type OutNorm = T;
+impl<'a, N: Norm> NetRunner for Runner<'a, N> {
 
   fn layer_num(&self) -> usize { self.net.layer_num() }
 
@@ -281,7 +277,7 @@ impl<'a, T: Norm> NetRunner for Runner<'a, T> {
   }
 }
 
-impl<'a, T: Norm> Runner<'a, T> {
+impl<'a, N: Norm> Runner<'a, N> {
 
   /// Crate a new runner using the given weights.
   pub fn new(ws: &'a Weights) -> Self { RunnerState::new().set_weights(ws) }
@@ -312,7 +308,7 @@ impl<'a, T: Norm> Runner<'a, T> {
 }
 
 /// A neural net in training.
-pub struct Trainer<T: Norm> {
+pub struct Trainer<N: Norm> {
   net:      Weights,        // weights
   d_layers: Weights,        // weight gradients
   batches: R,               // how many samples are in the (gradient for batching)
@@ -331,12 +327,15 @@ pub struct Trainer<T: Norm> {
   gbuf2: Vec<R>,
 
   // How to normalize output
-  _norm: PhantomData<T>
+  _norm: PhantomData<N>
 }
 
+impl<N: Norm> Norm for Trainer<N> {
+  type INorm = N::INorm;
+  type ONorm = N::ONorm;
+}
 
-impl<T: Norm> NetRunner for Trainer<T> {
-  type OutNorm = T;
+impl<N: Norm> NetRunner for Trainer<N> {
 
   fn layer_num(&self) -> usize { self.net.layer_num() }
   
@@ -346,7 +345,7 @@ impl<T: Norm> NetRunner for Trainer<T> {
   }
 }
 
-impl<T: Norm> Trainer<T> {
+impl<N: Norm> Trainer<N> {
 
   /// Create a trainer for the given net.
   pub fn new(net: Weights) -> Self {
@@ -420,7 +419,7 @@ impl<T: Norm> Trainer<T> {
 
     let (((last_is, last_os), last_ns), last_dns) = steps.next().unwrap();
 
-    T::error_delta(&last_os[0..self.net.output_size()], self.gbuf1.as_mut_slice());
+    N::ONorm::error_delta(&last_os[0..self.net.output_size()], self.gbuf1.as_mut_slice());
     last_lin_layer_dw(last_is, self.gbuf1.as_slice(), last_dns.as_mut_slice());
     last_lin_layer_dx(last_ns.as_slice(), self.gbuf1.as_slice(), self.gbuf2.as_mut_slice());
 
@@ -428,7 +427,7 @@ impl<T: Norm> Trainer<T> {
     for (((xs,ys), ns), dns) in steps {
       let (cur,next) = if swap { (self.gbuf1.as_mut_slice(), self.gbuf2.as_mut_slice()) }
                           else { (self.gbuf2.as_mut_slice(), self.gbuf1.as_mut_slice()) };
-      actuator_layer_delta(ys, cur);
+      actuator_layer_delta::<N::INorm>(ys, cur);
       lin_layer_dw(xs,            cur, dns.as_mut_slice());
       lin_layer_dx(ns.as_slice(), cur, next);
       swap = !swap;

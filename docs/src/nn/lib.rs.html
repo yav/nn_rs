@@ -450,7 +450,7 @@
 <span class="kw">use </span>rand::Rng;
 <span class="kw">use </span>rand::distr::Uniform;
 <span class="kw">use </span><span class="kw">crate</span>::common::<span class="kw-2">*</span>;
-<span class="kw">use </span><span class="kw">crate</span>::output::Norm;
+<span class="kw">use </span><span class="kw">crate</span>::norm::{Norm,Internal,Output};
 
 
 <span class="kw">type </span>Layer  = Vec&lt;Neuron&gt;;  <span class="comment">// a bunch of neurons sharing input
@@ -461,38 +461,32 @@
 <span class="kw">mod </span>common;
 
 <span class="doccomment">/// Specifies how to normalize and validate the result of a network.
-</span><span class="kw">pub mod </span>output;
+</span><span class="kw">pub mod </span>norm;
 
-<span class="comment">// Assumes `xs` contains a bias input (1)
-</span><span class="kw">fn </span>neuron(ws: <span class="kw-2">&amp;</span>[R], xs: <span class="kw-2">&amp;</span>[R]) -&gt; R {
-  sigmoid(linear(ws,xs))
-}
 
 <span class="comment">// Assumes `xs` contains a bias input
 // Produces an additional bias result in the first slot of the output
-</span><span class="kw">fn </span>layer(ns: <span class="kw-2">&amp;</span>[Neuron], xs: <span class="kw-2">&amp;</span>[R], res: <span class="kw-2">&amp;mut </span>[R]) {
+</span><span class="kw">fn </span>layer&lt;I: Internal&gt;(ns: <span class="kw-2">&amp;</span>[Neuron], xs: <span class="kw-2">&amp;</span>[R], res: <span class="kw-2">&amp;mut </span>[R]) {
   res[<span class="number">0</span>] = <span class="number">1.0</span>;
   <span class="kw">for </span>(ws,tgt) <span class="kw">in </span>ns.iter().zip(res[<span class="number">1</span>..].iter_mut()) {
-    <span class="kw-2">*</span>tgt = neuron(ws.as_slice(), xs)
+    <span class="kw-2">*</span>tgt = I::neuron_norm(linear(ws.as_slice(), xs));
   }
 }
 
 <span class="comment">// There's no bias in the last layer's output, and we normalize
 // the outputs in a custom way.
-</span><span class="kw">fn </span>last_layer&lt;T: Norm&gt;(ns: <span class="kw-2">&amp;</span>[Neuron], xs: <span class="kw-2">&amp;</span>[R], res: <span class="kw-2">&amp;mut </span>[R]) {
+</span><span class="kw">fn </span>last_layer&lt;O: Output&gt;(ns: <span class="kw-2">&amp;</span>[Neuron], xs: <span class="kw-2">&amp;</span>[R], res: <span class="kw-2">&amp;mut </span>[R]) {
   <span class="kw">for </span>(ws,tgt) <span class="kw">in </span>ns.iter().zip(res.iter_mut()) {
     <span class="kw-2">*</span>tgt = linear(ws.as_slice(), xs)
   }
-  T::normalize(res);
+  O::normalize(res);
 }
 
 
 
 <span class="comment">// We need to know how to do this to run a net.
-</span><span class="kw">trait </span>NetRunner {
-  <span class="comment">// How to normalize output
-  </span><span class="kw">type </span>OutNorm: Norm;
-
+</span><span class="kw">trait </span>NetRunner : Norm {
+  
   <span class="comment">// How many layers are in the net
   </span><span class="kw">fn </span>layer_num(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize;
 
@@ -506,19 +500,19 @@
   <span class="kw">let </span>last = r.layer_num() - <span class="number">1</span>;
   <span class="kw">for </span>i <span class="kw">in </span><span class="number">0 </span>.. last {
     <span class="kw">let </span>(l, rd, wt) = r.get_in_out(i);
-    layer(l, rd, wt);
+    layer::&lt;R::INorm&gt;(l, rd, wt);
   }
   <span class="kw">let </span>(l, rd, wt) = r.get_in_out(last);
-  last_layer::&lt;R::OutNorm&gt;(l, rd, wt);
+  last_layer::&lt;R::ONorm&gt;(l, rd, wt);
 }
 
 
 <span class="comment">// Update the error gradient to account for changes due to the actuators.
 // `ys` is the results of the layer (i.e., the normalized value).
 // The first element is bias
-</span><span class="kw">fn </span>actuator_layer_delta(ys: <span class="kw-2">&amp;</span>[R], gs_dy: <span class="kw-2">&amp;mut </span>[R]) {
+</span><span class="kw">fn </span>actuator_layer_delta&lt;I: Internal&gt;(ys: <span class="kw-2">&amp;</span>[R], gs_dy: <span class="kw-2">&amp;mut </span>[R]) {
   <span class="kw">for </span>i <span class="kw">in </span><span class="number">1 </span>.. ys.len() {
-    gs_dy[i - <span class="number">1</span>] <span class="kw-2">*</span>= sigmoid_dy(ys[i]);
+    gs_dy[i - <span class="number">1</span>] <span class="kw-2">*</span>= I::neuron_norm_dy(ys[i]);
   }
 }
 
@@ -698,7 +692,7 @@
     RunnerState { buf1: <span class="macro">vec!</span>[], buf2: <span class="macro">vec!</span>[] }
   }
 
-  <span class="kw">pub fn </span>set_weights&lt;T: Norm&gt;(<span class="kw-2">mut </span><span class="self">self</span>, net: <span class="kw-2">&amp;</span>Weights) -&gt; Runner&lt;T&gt; {
+  <span class="kw">pub fn </span>set_weights&lt;N: Norm&gt;(<span class="kw-2">mut </span><span class="self">self</span>, net: <span class="kw-2">&amp;</span>Weights) -&gt; Runner&lt;N&gt; {
     <span class="kw">let </span>size = <span class="number">1 </span>+ std::cmp::max(net.input_size(), std::cmp::max(net.hidden_size(), net.output_size()));
     <span class="self">self</span>.buf1.resize(size, <span class="number">0.0</span>);
     <span class="self">self</span>.buf2.resize(size, <span class="number">0.0</span>);
@@ -706,12 +700,15 @@
   } 
 }
 
+<span class="kw">impl</span>&lt;<span class="lifetime">'a</span>, N: Norm&gt; Norm <span class="kw">for </span>Runner&lt;<span class="lifetime">'a</span>, N&gt; {
+  <span class="kw">type </span>INorm = N::INorm;
+  <span class="kw">type </span>ONorm = N::ONorm;
+}
 
 <span class="doccomment">/// A neural net that can be used to map inputs to outputs.
-</span><span class="kw">pub struct </span>Runner&lt;<span class="lifetime">'a</span>, T: Norm&gt; { net: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>Weights, _norm: PhantomData&lt;T&gt;, state: RunnerState }
+</span><span class="kw">pub struct </span>Runner&lt;<span class="lifetime">'a</span>, N: Norm&gt; { net: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>Weights, _norm: PhantomData&lt;N&gt;, state: RunnerState }
 
-<span class="kw">impl</span>&lt;<span class="lifetime">'a</span>, T: Norm&gt; NetRunner <span class="kw">for </span>Runner&lt;<span class="lifetime">'a</span>, T&gt; {
-  <span class="kw">type </span>OutNorm = T;
+<span class="kw">impl</span>&lt;<span class="lifetime">'a</span>, N: Norm&gt; NetRunner <span class="kw">for </span>Runner&lt;<span class="lifetime">'a</span>, N&gt; {
 
   <span class="kw">fn </span>layer_num(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize { <span class="self">self</span>.net.layer_num() }
 
@@ -725,7 +722,7 @@
   }
 }
 
-<span class="kw">impl</span>&lt;<span class="lifetime">'a</span>, T: Norm&gt; Runner&lt;<span class="lifetime">'a</span>, T&gt; {
+<span class="kw">impl</span>&lt;<span class="lifetime">'a</span>, N: Norm&gt; Runner&lt;<span class="lifetime">'a</span>, N&gt; {
 
   <span class="doccomment">/// Crate a new runner using the given weights.
   </span><span class="kw">pub fn </span>new(ws: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>Weights) -&gt; <span class="self">Self </span>{ RunnerState::new().set_weights(ws) }
@@ -756,7 +753,7 @@
 }
 
 <span class="doccomment">/// A neural net in training.
-</span><span class="kw">pub struct </span>Trainer&lt;T: Norm&gt; {
+</span><span class="kw">pub struct </span>Trainer&lt;N: Norm&gt; {
   net:      Weights,        <span class="comment">// weights
   </span>d_layers: Weights,        <span class="comment">// weight gradients
   </span>batches: R,               <span class="comment">// how many samples are in the (gradient for batching)
@@ -775,12 +772,15 @@
   gbuf2: Vec&lt;R&gt;,
 
   <span class="comment">// How to normalize output
-  </span>_norm: PhantomData&lt;T&gt;
+  </span>_norm: PhantomData&lt;N&gt;
 }
 
+<span class="kw">impl</span>&lt;N: Norm&gt; Norm <span class="kw">for </span>Trainer&lt;N&gt; {
+  <span class="kw">type </span>INorm = N::INorm;
+  <span class="kw">type </span>ONorm = N::ONorm;
+}
 
-<span class="kw">impl</span>&lt;T: Norm&gt; NetRunner <span class="kw">for </span>Trainer&lt;T&gt; {
-  <span class="kw">type </span>OutNorm = T;
+<span class="kw">impl</span>&lt;N: Norm&gt; NetRunner <span class="kw">for </span>Trainer&lt;N&gt; {
 
   <span class="kw">fn </span>layer_num(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize { <span class="self">self</span>.net.layer_num() }
   
@@ -790,7 +790,7 @@
   }
 }
 
-<span class="kw">impl</span>&lt;T: Norm&gt; Trainer&lt;T&gt; {
+<span class="kw">impl</span>&lt;N: Norm&gt; Trainer&lt;N&gt; {
 
   <span class="doccomment">/// Create a trainer for the given net.
   </span><span class="kw">pub fn </span>new(net: Weights) -&gt; <span class="self">Self </span>{
@@ -864,7 +864,7 @@
 
     <span class="kw">let </span>(((last_is, last_os), last_ns), last_dns) = steps.next().unwrap();
 
-    T::error_delta(<span class="kw-2">&amp;</span>last_os[<span class="number">0</span>..<span class="self">self</span>.net.output_size()], <span class="self">self</span>.gbuf1.as_mut_slice());
+    N::ONorm::error_delta(<span class="kw-2">&amp;</span>last_os[<span class="number">0</span>..<span class="self">self</span>.net.output_size()], <span class="self">self</span>.gbuf1.as_mut_slice());
     last_lin_layer_dw(last_is, <span class="self">self</span>.gbuf1.as_slice(), last_dns.as_mut_slice());
     last_lin_layer_dx(last_ns.as_slice(), <span class="self">self</span>.gbuf1.as_slice(), <span class="self">self</span>.gbuf2.as_mut_slice());
 
@@ -872,7 +872,7 @@
     <span class="kw">for </span>(((xs,ys), ns), dns) <span class="kw">in </span>steps {
       <span class="kw">let </span>(cur,next) = <span class="kw">if </span>swap { (<span class="self">self</span>.gbuf1.as_mut_slice(), <span class="self">self</span>.gbuf2.as_mut_slice()) }
                           <span class="kw">else </span>{ (<span class="self">self</span>.gbuf2.as_mut_slice(), <span class="self">self</span>.gbuf1.as_mut_slice()) };
-      actuator_layer_delta(ys, cur);
+      actuator_layer_delta::&lt;N::INorm&gt;(ys, cur);
       lin_layer_dw(xs,            cur, dns.as_mut_slice());
       lin_layer_dx(ns.as_slice(), cur, next);
       swap = !swap;
