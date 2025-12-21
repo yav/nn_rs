@@ -22,8 +22,21 @@ type Norm = (ISigmoid, ORVec);
 
 /// The state of an agent in training.
 pub struct TrainingAgent {
-    pub learning_rate: R,     /// How much weight to give to new local rewards
-    pub discount: R,          /// How much weight to give to the future
+    /// How much weight to give to new information.
+    /// The value should be in the interval `[0,1]`, where 0 indicates that
+    /// we ignore new information, and 1 indicates that we should completely
+    /// ignore the current reward estimate.
+    /// Note that this is different than the learning rate of neural net,
+    /// which determines how far we go down a computed gradient.
+    pub learning_rate: R,
+
+    /// How much weight to give to future rewards.
+    /// This value should be in the interval `[0,1]`, where 0 indicates that
+    /// we should completely ignore future estimates and only consider the
+    /// immediate reward.
+    pub discount: R,          
+
+
     first: bool,              // True if we have not yet made any decisions
     decider: Trainer<Norm>,   // Use this to make decisions
     trainee: Trainer<Norm>    // Use this to learn
@@ -31,6 +44,7 @@ pub struct TrainingAgent {
 
 impl TrainingAgent {
 
+  /// Create a new agent using the given neural net for training.
   pub fn new(d: Trainer<Norm>) -> TrainingAgent {
     TrainingAgent {
       learning_rate: 0.5, // XXX
@@ -60,7 +74,6 @@ impl TrainingAgent {
     if !self.first {
       self.trainee.set_output()[0] += self.learning_rate * self.discount * reward;
       self.trainee.train();
-      // XXX: Decide on batch sizes
     } else {
       self.first = false;
     }

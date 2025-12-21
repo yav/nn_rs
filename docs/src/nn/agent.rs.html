@@ -85,7 +85,20 @@
 <a href="#84" id="84">84</a>
 <a href="#85" id="85">85</a>
 <a href="#86" id="86">86</a>
-<a href="#87" id="87">87</a></pre></div><pre class="rust"><code><span class="kw">pub use </span><span class="kw">crate</span>::common::R;
+<a href="#87" id="87">87</a>
+<a href="#88" id="88">88</a>
+<a href="#89" id="89">89</a>
+<a href="#90" id="90">90</a>
+<a href="#91" id="91">91</a>
+<a href="#92" id="92">92</a>
+<a href="#93" id="93">93</a>
+<a href="#94" id="94">94</a>
+<a href="#95" id="95">95</a>
+<a href="#96" id="96">96</a>
+<a href="#97" id="97">97</a>
+<a href="#98" id="98">98</a>
+<a href="#99" id="99">99</a>
+<a href="#100" id="100">100</a></pre></div><pre class="rust"><code><span class="kw">pub use </span><span class="kw">crate</span>::common::R;
 <span class="kw">use crate</span>::{Trainer};
 <span class="kw">use </span><span class="kw">crate</span>::norm::{ISigmoid,ORVec};
 
@@ -109,16 +122,30 @@
 
 <span class="doccomment">/// The state of an agent in training.
 </span><span class="kw">pub struct </span>TrainingAgent {
-    <span class="kw">pub </span>learning_rate: R,     <span class="doccomment">/// How much weight to give to new local rewards
-    </span><span class="kw">pub </span>discount: R,          <span class="doccomment">/// How much weight to give to the future
-    </span>first: bool,              <span class="comment">// True if we have not yet made any decisions
+    <span class="doccomment">/// How much weight to give to new information.
+    /// The value should be in the interval `[0,1]`, where 0 indicates that
+    /// we ignore new information, and 1 indicates that we should completely
+    /// ignore the current reward estimate.
+    /// Note that this is different than the learning rate of neural net,
+    /// which determines how far we go down a computed gradient.
+    </span><span class="kw">pub </span>learning_rate: R,
+
+    <span class="doccomment">/// How much weight to give to future rewards.
+    /// This value should be in the interval `[0,1]`, where 0 indicates that
+    /// we should completely ignore future estimates and only consider the
+    /// immediate reward.
+    </span><span class="kw">pub </span>discount: R,          
+
+
+    first: bool,              <span class="comment">// True if we have not yet made any decisions
     </span>decider: Trainer&lt;Norm&gt;,   <span class="comment">// Use this to make decisions
     </span>trainee: Trainer&lt;Norm&gt;    <span class="comment">// Use this to learn
 </span>}
 
 <span class="kw">impl </span>TrainingAgent {
 
-  <span class="kw">pub fn </span>new(d: Trainer&lt;Norm&gt;) -&gt; TrainingAgent {
+  <span class="doccomment">/// Create a new agent using the given neural net for training.
+  </span><span class="kw">pub fn </span>new(d: Trainer&lt;Norm&gt;) -&gt; TrainingAgent {
     TrainingAgent {
       learning_rate: <span class="number">0.5</span>, <span class="comment">// XXX
       </span>discount: <span class="number">0.8</span>, <span class="comment">// XXX
@@ -147,8 +174,7 @@
     <span class="kw">if </span>!<span class="self">self</span>.first {
       <span class="self">self</span>.trainee.set_output()[<span class="number">0</span>] += <span class="self">self</span>.learning_rate * <span class="self">self</span>.discount * reward;
       <span class="self">self</span>.trainee.train();
-      <span class="comment">// XXX: Decide on batch sizes
-    </span>} <span class="kw">else </span>{
+    } <span class="kw">else </span>{
       <span class="self">self</span>.first = <span class="bool-val">false</span>;
     }
     

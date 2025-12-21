@@ -320,6 +320,9 @@ pub struct Trainer<N: Norm> {
   /// of examples.
   pub learning_rate: R,
 
+  /// Update weights after seeing this many samples.
+  pub batch_size: usize,
+
   // The first one is for input, the rest are for the outputs of the layers.
   // Note that all vectors are 1 longer to accommodate for bias.
   // The last vector contains the output, without bias.
@@ -364,6 +367,7 @@ impl<N: Norm> Trainer<N> {
       batches:    0.0,
 
       learning_rate: 0.1,
+      batch_size: 1,
 
       buffers:    bufs,
       gbuf1:      vec![0.0; size],
@@ -405,6 +409,7 @@ impl<N: Norm> Trainer<N> {
     self.eval();
     self.backprop();
     self.batches += 1.0;
+    if self.batches > self.batch_size as R { self.finish_batch() }
   }
 
   /// Update the net's state based on the examples in the current batch.
