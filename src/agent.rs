@@ -26,7 +26,7 @@ pub struct TrainingAgent {
     /// The value should be in the interval `[0,1]`, where 0 indicates that
     /// we ignore new information, and 1 indicates that we should completely
     /// ignore the current reward estimate.
-    /// Note that this is different than the learning rate of neural net,
+    /// Note that this is different than the learning rate of the neural net,
     /// which determines how far we go down a computed gradient.
     pub learning_rate: R,
 
