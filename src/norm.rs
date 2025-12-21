@@ -1,4 +1,4 @@
-use crate::common::R;
+pub use crate::common::R;
 
 
 // Activation function for a neuron.  Used to normalize each neuron's output.
@@ -49,6 +49,7 @@ pub trait Internal {
 }
 
 /// Normalize internal values using `sigmoid`.
+#[derive(Copy,Clone)]
 pub struct ISigmoid {}
 
 impl Internal for ISigmoid {
@@ -72,6 +73,7 @@ pub trait Output {
 
 /// Don't normalize the outputs.
 /// Error is computed as half of the sum of the squares of the individual errors.
+#[derive(Copy,Clone)]
 pub struct ORVec {}
 
 impl Output for ORVec {
@@ -88,6 +90,7 @@ impl Output for ORVec {
 
 /// Normalize the outputs with `sigmoid`.
 /// Error is computed as half of the sum of the squares of the individual errors.
+#[derive(Copy,Clone)]
 pub struct OBitVec {}
 
 impl Output for OBitVec {
@@ -110,6 +113,7 @@ impl Output for OBitVec {
 /// This is suitable for functions that need to pick one out of some
 /// options (i.e., classifiers).   Each result represents the likelihood that
 /// the input belongs to the given class, and all outputs sum up to 1.
+#[derive(Copy,Clone)]
 pub struct OClassifier {}
 
 impl Output for OClassifier {

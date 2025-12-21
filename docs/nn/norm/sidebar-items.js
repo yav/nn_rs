@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["ISigmoid","OBitVec","OClassifier","ORVec"],"trait":["Internal","Norm","Output"]};
+window.SIDEBAR_ITEMS = {"struct":["ISigmoid","OBitVec","OClassifier","ORVec"],"trait":["Internal","Norm","Output"],"type":["R"]};

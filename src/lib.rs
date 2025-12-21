@@ -18,6 +18,7 @@ mod common;
 
 /// Specifies how to normalize and validate the result of a network.
 pub mod norm;
+pub mod agent;
 
 
 // Assumes `xs` contains a bias input
@@ -113,6 +114,7 @@ impl Dim {
 }
 
 /// The weights of a neural network.
+#[derive(Clone)]
 pub struct Weights {
   layers: Vec<Layer>
 }
@@ -307,6 +309,7 @@ impl<'a, N: Norm> Runner<'a, N> {
 
 }
 
+#[derive(Clone)]
 /// A neural net in training.
 pub struct Trainer<N: Norm> {
   net:      Weights,        // weights
@@ -385,11 +388,21 @@ impl<N: Norm> Trainer<N> {
     &mut b[0 .. self.net.output_size()]
   }
 
+  /// Evaluate the net on the current input.
+  pub fn eval(&mut self) { eval(self) }
+
+  /// Get the results of evaluating the net.
+  /// Only valid after calling [Self::eval] or [Self::train].
+  pub fn get_output(&self) -> &[R] {
+    let xs = self.buffers.last().unwrap().as_slice();
+    &xs[0 .. self.net.output_size()]
+  }
+
   /// Train based on the current input output pair.  For batch training,
   /// one can do multiple examples, and update the net as the average
   /// of the change from all examples.
   pub fn train(&mut self) {
-    eval(self);
+    self.eval();
     self.backprop();
     self.batches += 1.0;
   }
